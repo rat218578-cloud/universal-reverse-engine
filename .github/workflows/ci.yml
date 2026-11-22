@@ -1,0 +1,42 @@
+name: ci
+on:
+  push:
+  pull_request:
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Testes unitários e de integração do backend
+        working-directory: apps/backend
+        run: python -m unittest discover -s tests -t . -v
+      - name: E2E de segurança com servidor real
+        working-directory: apps/backend
+        run: python scripts/e2e_security.py
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Testes puros da interface
+        working-directory: apps/web
+        run: npm test
+  release-artifacts:
+    needs: [backend, web]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Gerar wheel, código-fonte e somas
+        run: python scripts/build_release.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: artefatos-ure
+          path: dist/
