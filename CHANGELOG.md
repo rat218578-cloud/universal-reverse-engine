@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.0.0 — 2026-11-22
+
+Primeira versão pública. Integra a RC 1.0.0rc1 e as correções da validação.
+
+### Adicionado
+- Arquivo de configuração `ure.env` (modelo em `ure.env.example`), lido a partir do diretório de execução ou de `URE_CONFIG`. Variáveis do ambiente têm precedência.
+- Instalador para Linux `scripts/install-linux.sh` (sem root, sem rede, a partir do wheel).
+- Guias: `INSTALL.md`, `docs/PRIMEIROS-PASSOS.md`, `docs/SOLUCAO-DE-PROBLEMAS.md`.
+- Licença MIT.
+- Versão exposta em `/api/v1/health`.
+
+### Corrigido na validação
+- Captura de saída de motores limitada a 4 MiB por fluxo (um motor que escrevia sem parar gerava 49 MiB de log).
+- Página do projeto sem descrição não mostra mais `null`.
+- Mensagem de formato recusado em linguagem clara, sem o termo técnico `unknown`.
+- Cliente que desconecta no meio de uma requisição não gera mais traceback no log.
+- Porta ocupada gera mensagem orientando `URE_PORT`, sem traceback.
+- Versão do Java ignora avisos da JVM.
+
+### Limitações conhecidas
+- Nenhum motor de análise externo (apktool, JADX, apkanalyzer, ILSpy, Ghidra) foi executado com ferramenta real. Ausentes são registrados como `missing`.
+- Manifesto Android binário (AXML) e permissões não são decodificados. DEX é identificado, não analisado.
+- IA: testada apenas com servidores falsos. Não há validação com modelo real.
+- Limite de CPU não é aplicado ao trabalho em processo; o limite é de tempo.
+- Sem cota global de disco; exportações não são removidas automaticamente.
+- Sem limite de conexões simultâneas.
+- Logs de motores não são varridos por segredos.
+- Um processo servidor por diretório de dados.
+- Testado apenas em Linux (Ubuntu, Python 3.12.3). Windows e macOS não foram testados. Python 3.11 não foi testado.
+- Interface testada em Chromium; Firefox e WebKit não foram testados.
+- Sem aplicativo desktop empacotado e sem imagem Docker.
+
 ## 1.0.0rc1 — Release Candidate (2026-11-22)
 
 Primeira versão candidata para lançamento. Base: branch `security/correcao-auditoria`.
@@ -38,5 +70,3 @@ Primeira versão candidata para lançamento. Base: branch `security/correcao-aud
 - Testado apenas em Linux com Python 3.12.3. Windows e macOS não foram testados. Python 3.11 declarado mas não testado.
 - Sem instaladores de desktop, Docker não construído, Tauri não compilado.
 
-## 1.0.0 — não lançada
-Reservado para após a validação das limitações acima em ambientes adicionais.

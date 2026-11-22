@@ -10,6 +10,25 @@ MB = 1024 * 1024
 LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
+def load_env_file(path: Path) -> int:
+    """Carrega linhas KEY=VALUE de um arquivo de configuração. Só aceita chaves URE_*.
+    Variáveis já definidas no ambiente têm precedência. Retorna quantas foram carregadas."""
+    if not path.is_file():
+        return 0
+    loaded = 0
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip(chr(34)).strip(chr(39))
+        if key.startswith("URE_") and key not in os.environ:
+            os.environ[key] = value
+            loaded += 1
+    return loaded
+
+
 @dataclass(frozen=True)
 class Settings:
     data_dir: Path
@@ -36,6 +55,7 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> Settings:
+        load_env_file(Path(os.environ.get("URE_CONFIG", "ure.env")).expanduser())
         env = os.environ
 
         def num(key: str, default: int) -> int:

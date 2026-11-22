@@ -20,7 +20,7 @@ BACKEND = ROOT / "apps" / "backend"
 WEB = ROOT / "apps" / "web"
 DIST = Path(sys.argv[sys.argv.index("--out") + 1]).resolve() if "--out" in sys.argv else ROOT / "dist"
 PKG_WEB = BACKEND / "ure" / "web"
-VERSION = "1.0.0rc1"
+VERSION = "1.0.0"
 
 
 def run(cmd: list[str], cwd: Path) -> str:

@@ -1,68 +1,94 @@
-# Instalação e execução — Universal Reverse Engine 1.0.0rc1
+# Instalação — Universal Reverse Engine 1.0.0
+
+Análise local de APK e EXE/DLL: upload, identificação, análise estática, extração, visualização e exportação em ZIP.
+A interface roda no navegador, servida pelo próprio programa, somente na sua máquina.
+
+## Plataformas
+
+| Plataforma | Situação |
+|---|---|
+| Linux (Ubuntu 24.04, Python 3.12.3) | **Testado**: instalação, execução, interface e fluxos completos |
+| Windows 10/11 | **Não testado.** Os passos abaixo são os padrões do Python; não foram executados |
+| macOS | **Não testado** |
 
 ## Requisitos
-- Linux (testado em Ubuntu 24.04 com Python 3.12.3). Outros sistemas não foram testados.
-- Python 3.11 ou superior (declarado; testado apenas em 3.12).
-- Git, somente se você quiser exportar para repositório Git local.
-- Node.js 22+, somente para executar os testes da interface.
-- Nenhuma dependência externa para o modo básico.
-- Opcional: apktool, JADX, apkanalyzer, ILSpy, Ghidra e Ollama. Sem eles, as etapas correspondentes ficam como "ausentes" no relatório.
+- Python 3.11 ou superior.
+- Nenhuma dependência de runtime. O programa usa apenas a biblioteca padrão do Python.
+- Opcional: ferramentas externas (apktool, JADX, apkanalyzer, ILSpy, Ghidra) e Ollama. Sem elas, as etapas correspondentes aparecem como `missing` no relatório, com o motivo.
+- Opcional, para testes da interface: Node.js 22 ou superior.
 
-## Instalar a partir do wheel
+## Obter o pacote
+Baixe da página de releases do repositório (quando publicado):
+- `universal_reverse_engine-1.0.0-py3-none-any.whl` (pacote instalável)
+- `universal-reverse-engine-1.0.0-source.tar.gz` (código-fonte)
+- `SHA256SUMS` (conferência de integridade)
+
+Confira a integridade antes de instalar:
+```
+sha256sum -c SHA256SUMS
+```
+
+## Linux
+
+Instalação com o script (cria um ambiente virtual em `~/.local/share/universal-reverse-engine` e um link em `~/.local/bin`):
+```
+chmod +x install-linux.sh
+./install-linux.sh universal_reverse_engine-1.0.0-py3-none-any.whl
+```
+
+Ou manualmente:
 ```
 python3 -m venv ~/ure-venv
-~/ure-venv/bin/pip install dist/universal_reverse_engine-1.0.0rc1-py3-none-any.whl
+~/ure-venv/bin/pip install universal_reverse_engine-1.0.0-py3-none-any.whl
 ~/ure-venv/bin/ure-server
 ```
 
-## Executar a partir do código-fonte
+Execução:
 ```
-cd apps/backend
-python3 -m ure.server
+ure-server
 ```
+Abra `http://127.0.0.1:8765` no navegador. Veja `docs/PRIMEIROS-PASSOS.md`.
 
-## Acessar
-1. Abra `http://127.0.0.1:8765` no navegador.
-2. Leia o token em `data/session.token` (ou no caminho de `URE_DATA_DIR`). Em modo instalado, o diretório de dados é o diretório em que o comando foi executado, salvo `URE_DATA_DIR`.
-3. Cole o token no campo "Token" do topo da página.
+## Windows (NÃO TESTADO)
 
-Para usar a API diretamente:
+Os comandos abaixo seguem a documentação padrão do Python. **Não foram executados neste projeto.**
+```
+py -3.12 -m venv %USERPROFILE%\ure-venv
+%USERPROFILE%\ure-venv\Scripts\pip install universal_reverse_engine-1.0.0-py3-none-any.whl
+%USERPROFILE%\ure-venv\Scripts\ure-server
+```
+Limitações conhecidas no Windows: o limite de memória dos motores externos não é aplicado (depende de POSIX);
+permissões do arquivo de token não se aplicam da mesma forma. Não há instalador `.exe`.
+
+## Configuração
+
+O servidor lê `ure.env` do diretório onde é executado (ou o arquivo indicado em `URE_CONFIG`). Copie o modelo:
+```
+cp ure.env.example ure.env
+```
+Variáveis já definidas no ambiente têm precedência. Tabela completa em `ure.env.example`.
+
+## Token de acesso
+
+Na primeira execução, o servidor cria `data/session.token` (permissão 0600 em Linux). A interface pede esse token.
+Use-o também na API:
 ```
 curl -H "Authorization: Bearer $(cat data/session.token)" http://127.0.0.1:8765/api/v1/projects
 ```
+Para usar um token fixo, defina `URE_TOKEN` no ambiente. Não compartilhe o token.
 
-## Variáveis de ambiente principais
-| Variável | Padrão | Função |
-|---|---|---|
-| `URE_DATA_DIR` | `./data` | Banco, artefatos e token |
-| `URE_HOST` / `URE_PORT` | `127.0.0.1` / `8765` | Endereço de escuta |
-| `URE_TOKEN` | gerado | Token fixo (substitui o arquivo) |
-| `URE_ALLOWED_HOSTS` | vazio | Nomes de Host adicionais, separados por vírgula |
-| `URE_WEB_DIR` | empacotada | Pasta alternativa da interface |
-| `URE_MAX_UPLOAD_MB` | 512 | Tamanho máximo de upload |
-| `URE_MAX_EXTRACT_MB` | 2048 | Tamanho máximo extraído por artefato |
-| `URE_JOB_TIMEOUT_S` | 900 | Tempo limite por job |
-| `URE_SOCKET_TIMEOUT_S` | 30 | Timeout de socket |
-| `URE_AI_ENABLED` | 0 | `1` liga a IA opcional |
-| `URE_OLLAMA_MODEL` | `llama3.2` | Modelo local (Ollama em 127.0.0.1:11434) |
-| `URE_EXTERNAL_AI_URL` / `URE_EXTERNAL_AI_KEY` | vazio | Provedor externo (exige `consent=true` em cada requisição) |
-
-Ferramentas externas podem ser apontadas com `URE_APKTOOL`, `URE_JADX`, `URE_APKANALYZER`, `URE_ILSPYCMD`, `URE_GHIDRA`.
-
-## Testes
+## Testes (para quem instala a partir do código-fonte)
 ```
 cd apps/backend
-python3 -m unittest discover -s tests -t . -v      # 130 testes
+python3 -m unittest discover -s tests -t . -v      # 144 testes
 python3 scripts/e2e_security.py                    # 22 verificações com servidor real
 cd ../web && npm test                              # 4 testes
 ```
+Teste de navegador (requer Playwright e Chromium): `python3 scripts/browser_e2e.py`.
 
-## Gerar os artefatos
-```
-python3 scripts/build_release.py
-```
-Gera em `dist/`: o wheel, o código-fonte (`*-source.tar.gz`, a partir do HEAD), `SHA256SUMS` e `BUILDINFO.txt`.
+## Desinstalação
+Linux: `rm -rf ~/.local/share/universal-reverse-engine ~/.local/bin/ure-server`.
+Os dados analisados ficam em `data/` do diretório de execução; apague-os separadamente se quiser.
 
-## Limitações
-Consulte `CHANGELOG.md` e `docs/AUDIT.md`. Em particular: os motores externos não foram executados com ferramenta real,
-e a plataforma testada é apenas Linux.
+## Problemas
+Veja `docs/SOLUCAO-DE-PROBLEMAS.md`.
