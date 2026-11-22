@@ -503,7 +503,7 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
             # cliente desconectou antes de receber a resposta: não é erro interno do servidor
             try:
                 super().handle()
-            except (BrokenPipeError, ConnectionResetError, TimeoutError):
+            except (ConnectionError, TimeoutError):  # inclui ConnectionAbortedError (Windows)
                 self.close_connection = True
 
         def do_GET(self) -> None:  # noqa: N802
@@ -567,6 +567,9 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 self._json(422, {"error": str(exc)}, head_only=head_only)
             except ArchiveLimitError as exc:
                 self._json(413, {"error": str(exc)}, head_only=head_only)
+            except ConnectionError:
+                # cliente desconectou no meio da requisição ou da resposta: não é erro do servidor
+                self.close_connection = True
             except Exception:
                 traceback.print_exc(file=sys.stderr)
                 self._json(500, {"error": "erro interno"}, head_only=head_only)
@@ -658,7 +661,7 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                         self.wfile.flush()
                         return
                     time.sleep(0.5)
-            except (BrokenPipeError, ConnectionResetError, TimeoutError):
+            except (ConnectionError, TimeoutError):  # inclui ConnectionAbortedError (Windows)
                 return
 
         def _stream(self, path: Path, mime: str, extra: dict[str, str] | None = None,
