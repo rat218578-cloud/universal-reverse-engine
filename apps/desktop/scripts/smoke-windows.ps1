@@ -135,20 +135,20 @@ function Api([string]$method, [string]$path, $body = $null) {
     if ($null -ne $body) { $params.Body = ($body | ConvertTo-Json -Depth 8); $params.ContentType = "application/json" }
     return Invoke-RestMethod @params
 }
-function Analyze-File([string]$pid, [string]$file, [string]$expectKind) {
+function Analyze-File([string]$projectId, [string]$file, [string]$expectKind) {
     $name = Split-Path $file -Leaf
-    $up = Invoke-RestMethod -Method Post -Uri "$base/projects/$pid/artifacts" -Headers ($auth + @{
+    $up = Invoke-RestMethod -Method Post -Uri "$base/projects/$projectId/artifacts" -Headers ($auth + @{
         "X-Filename" = $name; "Content-Type" = "application/octet-stream" }) -InFile $file -TimeoutSec 120
-    if ($up.kind -ne $expectKind) { throw "$name: tipo detectado '$($up.kind)', esperado '$expectKind'" }
-    $job = Api "POST" "/projects/$pid/artifacts/$($up.id)/analyze" @{}
+    if ($up.kind -ne $expectKind) { throw "${name}: tipo detectado '$($up.kind)', esperado '$expectKind'" }
+    $job = Api "POST" "/projects/$projectId/artifacts/$($up.id)/analyze" @{}
     $deadline = (Get-Date).AddSeconds(600)
     do {
         Start-Sleep -Milliseconds 500
         $job = Api "GET" "/jobs/$($job.id)"
     } while ($job.status -in @("queued", "running") -and (Get-Date) -lt $deadline)
-    if ($job.status -ne "done") { throw "$name: análise terminou com '$($job.status)': $($job.error)" }
-    $report = Api "GET" "/projects/$pid/artifacts/$($up.id)/report"
-    if ($report.integrity -ne "ok") { throw "$name: integridade '$($report.integrity)'" }
+    if ($job.status -ne "done") { throw "${name}: análise terminou com '$($job.status)': $($job.error)" }
+    $report = Api "GET" "/projects/$projectId/artifacts/$($up.id)/report"
+    if ($report.integrity -ne "ok") { throw "${name}: integridade '$($report.integrity)'" }
     return @{ artifact = $up.id; report = $report }
 }
 

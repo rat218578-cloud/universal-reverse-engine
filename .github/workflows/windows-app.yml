@@ -81,6 +81,9 @@ jobs:
     needs: backend-regression
     runs-on: windows-2022
     timeout-minutes: 120
+    permissions:
+      contents: read
+      checks: write  # só para publicar a transcrição do teste de instalação em caso de falha
     defaults:
       run:
         shell: pwsh
