@@ -97,9 +97,12 @@ Este passo **não foi testado**. Confirme que `python.exe -m ure.server` sobe a 
 | Matar o app à força encerra o backend | Verificado no Linux |
 | Erro de Python exibido em caixa de diálogo | Verificado no Linux |
 | Testes de contrato do backend como processo (token, Host, persistência, encerramento) | Passam em qualquer plataforma |
-| **Build e execução no Windows** | **Não verificado** — o alvo Windows do Rust não pôde ser baixado neste ambiente |
-| **Instalador `.exe` / `.msi`** | **Não gerado** — exige Windows com as ferramentas acima |
-| WebView2 em Windows | Não testado |
+| Build Tauri no Windows (MSVC, `windows-2022`) | Verificado no GitHub Actions: [run 45075953620](https://github.com/rat218578-cloud/universal-reverse-engine/actions/runs/45075953620) |
+| Instalador NSIS (`.exe`) | Gerado no runner e instalado em silêncio no próprio teste |
+| Instalador MSI (`.msi`) | Gerado; conteúdo conferido por extração administrativa (não instalado) |
+| Teste de instalação Windows (`apps/desktop/scripts/smoke-windows.ps1`) | Passou: instalação, abertura, saúde do backend, janela, encerramento gracioso, morte forçada, análise de APK/EXE/DLL pelo backend instalado, persistência de projeto após reinício, desinstalação |
+| WebView2 em Windows | Presente no runner; não testado em máquina do usuário |
+| Python | **Não incluído no instalador**: o computador de destino precisa de Python 3.11+ (ver seção abaixo) |
 | Ícones | Provisórios, gerados por script (`icons/`). Substitua pela marca oficial antes de distribuir |
 
 ## Limitações conhecidas

@@ -40,7 +40,7 @@ de segredos; Windows não testado; interface não testada em navegador. Detalhes
 - Ollama: testado contra servidor falso em loopback.
 - Provedor OpenAI-compatível: testado contra servidor falso em loopback.
 - Dockerfile: não construído (Docker ausente).
-- Aplicativo Windows (`apps/desktop`, Tauri 2): compila e roda no Linux (testes Rust, execução sob Xvfb, encerramento verificado). **Build e execução no Windows não verificados**; instalador `.exe`/`.msi` não gerado.
+- Aplicativo Windows (`apps/desktop`, Tauri 2): compila no Linux e no Windows (GitHub Actions, `windows-2022`). Instalador NSIS verificado com instalação, execução e desinstalação em silêncio. MSI gerado e conferido por extração, não instalado. Python não é incluído no instalador.
 - CI em `.github/workflows/ci.yml`: não executado (sem remoto).
 
 ## Parcial
@@ -54,7 +54,7 @@ de segredos; Windows não testado; interface não testada em navegador. Detalhes
 - Repositório no GitHub, push, publicação e commits automatizados em remoto.
 - Usuários e sessões (só token único).
 - Análise de Mach-O e ELF.
-- Instalador Windows gerado e assinado (ver `apps/desktop/README.md`).
+- Instalador Windows assinado e com Python embutido (ver `apps/desktop/README.md`).
 
 ## Bloqueado por falta de rede ou ferramentas
 - Instalação de apktool, JADX, apkanalyzer, ILSpy, Ghidra, LIEF, Ollama e modelos.
