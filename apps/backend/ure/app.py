@@ -118,6 +118,26 @@ def _extension_mismatch(name: str, kind: str) -> bool:
     return ext not in EXPECTED_EXT.get(kind, set())
 
 
+KIND_MESSAGES = {
+    "unknown": "o conteúdo não é um APK nem um executável PE (assinatura não reconhecida)",
+    "corrupt": "arquivo corrompido ou cabeçalho inválido",
+    "empty": "arquivo vazio",
+    "zip": "arquivo ZIP genérico, não é um APK",
+    "jar": "arquivo JAR, não aceito nesta versão",
+    "elf": "executável ELF, não aceito nesta versão",
+    "macho": "executável Mach-O, não aceito nesta versão",
+    "dex": "bytecode DEX isolado; envie o APK completo",
+}
+
+
+def _format_rejection(info: dict[str, Any]) -> str:
+    message = f"formato não aceito: {KIND_MESSAGES.get(info['kind'], info['kind'])}"
+    reason = info.get("reason")
+    if reason and info["kind"] == "corrupt":
+        message += f" ({reason})"
+    return message
+
+
 def _summarize(info: dict[str, Any]) -> dict[str, Any]:
     summary: dict[str, Any] = {"kind": info["kind"]}
     if "reason" in info:
@@ -273,8 +293,7 @@ def upload_artifact(a: App, h: Any, m: Any, q: dict[str, str]) -> tuple[int, Any
                 remaining -= len(chunk)
         info = identify(tmp)
         if info["kind"] not in UPLOADABLE_KINDS:
-            reason = info.get("reason", "")
-            raise ApiError(415, f"formato não aceito: {info['kind']}. {reason}".strip())
+            raise ApiError(415, _format_rejection(info))
         final = root / "original" / name
         os.replace(tmp, final)
         make_readonly(final)
@@ -479,6 +498,13 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
 
         def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
             return
+
+        def handle(self) -> None:
+            # cliente desconectou antes de receber a resposta: não é erro interno do servidor
+            try:
+                super().handle()
+            except (BrokenPipeError, ConnectionResetError, TimeoutError):
+                self.close_connection = True
 
         def do_GET(self) -> None:  # noqa: N802
             self._dispatch("GET")

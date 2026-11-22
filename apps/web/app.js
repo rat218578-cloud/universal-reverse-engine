@@ -31,7 +31,7 @@ function toast(message, isError = false) {
 
 const errText = (e) => (e instanceof ApiErr ? `${e.message} (HTTP ${e.status})` : e.message || String(e));
 const fail = (e) => toast(errText(e), true);
-const show = (...nodes) => view.replaceChildren(...nodes);
+const show = (...nodes) => view.replaceChildren(...nodes.filter((n) => n !== null && n !== undefined && n !== false));
 
 // ----- saúde e token -----------------------------------------------------
 async function refreshHealth() {

@@ -73,8 +73,14 @@ def _version(path: str, args: tuple[str, ...]) -> str | None:
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
-    lines = (proc.stdout or proc.stderr or "").strip().splitlines()
-    return lines[0][:120] if lines else None
+    text = f"{proc.stdout or ''}\n{proc.stderr or ''}"
+    # a JVM imprime avisos como "Picked up JAVA_TOOL_OPTIONS" antes da versão real
+    lines = [ln.strip() for ln in text.splitlines()
+             if ln.strip() and not ln.lstrip().startswith(("Picked up", "NOTE:", "WARNING:"))]
+    if not lines:
+        return None
+    preferred = next((ln for ln in lines if "version" in ln.lower()), lines[0])
+    return preferred[:120]
 
 
 def probe(spec: ToolSpec) -> dict[str, Any]:
@@ -100,6 +106,32 @@ def probe_all() -> list[dict[str, Any]]:
     return [probe(spec) for spec in SPECS]
 
 
+MAX_CAPTURE_BYTES = 4 * MB
+_TRUNCATED = b"\n[saida truncada: limite de captura atingido]\n"
+
+
+def _drain(stream: Any, path: Path, cap: int) -> None:
+    """Lê o fluxo até o fim, gravando no máximo `cap` bytes. O restante é descartado,
+    mas continua sendo lido: o processo nunca fica bloqueado numa escrita de pipe."""
+    written = 0
+    marked = False
+    try:
+        with path.open("wb") as fh:
+            for chunk in iter(lambda: stream.read(65536), b""):
+                if written < cap:
+                    part = chunk[: cap - written]
+                    fh.write(part)
+                    written += len(part)
+                    rest = chunk[len(part):]
+                else:
+                    rest = chunk
+                if rest and not marked:
+                    fh.write(_TRUNCATED)
+                    marked = True
+    finally:
+        stream.close()
+
+
 def run_tool(
     argv: list[str],
     *,
@@ -110,9 +142,8 @@ def run_tool(
     stdout_file: Path | None = None,
     cancel: threading.Event | None = None,
 ) -> dict[str, Any]:
-    """Executa um motor com tempo limite, cancelamento e limite de memória virtual (POSIX).
-
-    Saídas vão para arquivos (nunca para pipes sem leitura, que travariam em saídas grandes).
+    """Executa um motor com tempo limite, cancelamento, limite de memória virtual (POSIX) e
+    captura limitada: no máximo MAX_CAPTURE_BYTES por fluxo (stdout e stderr).
     Em tempo esgotado ou cancelamento, o processo é encerrado.
     """
     cmd = list(argv)
@@ -121,37 +152,38 @@ def run_tool(
         cmd = [sys.executable, "-c", _LIMIT_STUB, str(memory_mb * MB), *argv]
     env = {k: os.environ[k] for k in ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "JAVA_HOME") if k in os.environ}
     log.parent.mkdir(parents=True, exist_ok=True)
-    err_fh = log.open("wb")
-    out_fh = stdout_file.open("wb") if stdout_file else None
+    kwargs: dict[str, Any] = {"stdin": subprocess.DEVNULL, "stdout": subprocess.PIPE}
+    if stdout_file is not None:
+        kwargs["stderr"] = subprocess.PIPE
+    else:
+        kwargs["stderr"] = subprocess.STDOUT
     try:
-        kwargs: dict[str, Any] = {"stdin": subprocess.DEVNULL}
-        if out_fh is not None:
-            kwargs.update(stdout=out_fh, stderr=err_fh)
-        else:
-            kwargs.update(stdout=err_fh, stderr=subprocess.STDOUT)
+        proc = subprocess.Popen(cmd, cwd=cwd, env=env, **kwargs)
+    except FileNotFoundError:
+        log.write_bytes(b"")
+        return {"status": "missing", "memory_limit_applied": limited}
+    drains = [threading.Thread(target=_drain, args=(proc.stdout, stdout_file or log, MAX_CAPTURE_BYTES), daemon=True)]
+    if stdout_file is not None:
+        drains.append(threading.Thread(target=_drain, args=(proc.stderr, log, MAX_CAPTURE_BYTES), daemon=True))
+    for t in drains:
+        t.start()
+    deadline = time.monotonic() + timeout_s
+    status: str | None = None
+    while status is None:
         try:
-            proc = subprocess.Popen(cmd, cwd=cwd, env=env, **kwargs)
-        except FileNotFoundError:
-            return {"status": "missing", "memory_limit_applied": limited}
-        deadline = time.monotonic() + timeout_s
-        status: str | None = None
-        while status is None:
-            try:
-                rc = proc.wait(timeout=0.2)
-                status = "ok" if rc == 0 else "failed"
-            except subprocess.TimeoutExpired:
-                if cancel is not None and cancel.is_set():
-                    proc.kill()
-                    proc.wait()
-                    status = "cancelled"
-                elif time.monotonic() > deadline:
-                    proc.kill()
-                    proc.wait()
-                    status = "timeout"
-    finally:
-        if out_fh is not None:
-            out_fh.close()
-        err_fh.close()
+            rc = proc.wait(timeout=0.2)
+            status = "ok" if rc == 0 else "failed"
+        except subprocess.TimeoutExpired:
+            if cancel is not None and cancel.is_set():
+                proc.kill()
+                proc.wait()
+                status = "cancelled"
+            elif time.monotonic() > deadline:
+                proc.kill()
+                proc.wait()
+                status = "timeout"
+    for t in drains:
+        t.join(timeout=10)
     result: dict[str, Any] = {"status": status, "log": log.name, "memory_limit_applied": limited}
     if status in ("ok", "failed"):
         result["returncode"] = proc.returncode

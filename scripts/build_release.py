@@ -18,7 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "apps" / "backend"
 WEB = ROOT / "apps" / "web"
-DIST = ROOT / "dist"
+DIST = Path(sys.argv[sys.argv.index("--out") + 1]).resolve() if "--out" in sys.argv else ROOT / "dist"
 PKG_WEB = BACKEND / "ure" / "web"
 VERSION = "1.0.0rc1"
 
