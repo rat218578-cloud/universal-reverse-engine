@@ -416,6 +416,17 @@ async function route() {
   show(h("p", {}, "Página não encontrada."));
 }
 
+// Modo desktop: o lançador (Tauri) injeta o token local antes da página carregar.
+// Na versão web esta condição é falsa e o comportamento não muda.
+const desktopToken = window.URE_DESKTOP && typeof window.URE_DESKTOP.token === "string"
+  ? window.URE_DESKTOP.token.trim()
+  : "";
+if (desktopToken) {
+  setToken(desktopToken);
+  const field = document.querySelector("#token");
+  if (field) field.value = desktopToken;
+}
+
 window.addEventListener("hashchange", route);
 refreshHealth();
 route();
