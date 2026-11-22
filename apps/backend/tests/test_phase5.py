@@ -30,6 +30,7 @@ class StaticUiTests(ApiCase):
     def test_unknown_static_is_404_and_post_static_refused(self) -> None:
         self.assertEqual(self.call("GET", "/nao-existe.html")[0], 404)
         self.assertEqual(self.call("POST", "/")[0], 405)
+        self.assertEqual(self.call("HEAD", "/")[0], 405)
 
 
 if __name__ == "__main__":

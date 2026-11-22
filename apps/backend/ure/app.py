@@ -395,6 +395,9 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
         def do_DELETE(self) -> None:  # noqa: N802
             self._dispatch("DELETE")
 
+        def do_HEAD(self) -> None:  # noqa: N802
+            self._dispatch("HEAD")
+
         def do_PUT(self) -> None:  # noqa: N802
             self._dispatch("PUT")
 
