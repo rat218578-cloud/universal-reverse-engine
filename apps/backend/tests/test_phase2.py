@@ -60,7 +60,8 @@ class ToolRegistryTests(unittest.TestCase):
         if not res.get("memory_limit_applied"):
             self.skipTest("limite de memória não aplicável nesta plataforma")
         self.assertEqual(res["status"], "failed")
-        self.assertNotIn(b"alocou", (self.tmp / "m.log").read_bytes())
+        # Compare whole lines: the traceback echoes the source line, which also contains "alocou".
+        self.assertNotIn(b"alocou", (self.tmp / "m.log").read_bytes().splitlines())
 
     def test_run_tool_success_records_log(self) -> None:
         res = run_tool([sys.executable, "-c", "print('ok-sem-erro')"], cwd=self.tmp,
