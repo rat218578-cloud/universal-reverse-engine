@@ -77,6 +77,7 @@ def safe_extract_zip(
                 target.mkdir(parents=True, exist_ok=True)
                 report.directories += 1
                 continue
+            # Tipo Unix nos bits altos de external_attr. 0 = sem tipo informado (arquivo comum).
             file_type = stat.S_IFMT(mode)
             if file_type not in (0, stat.S_IFREG):
                 report.skipped.append(f"entrada especial ignorada: {info.filename}")

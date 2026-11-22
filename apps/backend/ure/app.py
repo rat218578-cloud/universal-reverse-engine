@@ -398,6 +398,9 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
         def do_HEAD(self) -> None:  # noqa: N802
             self._dispatch("HEAD")
 
+        def do_OPTIONS(self) -> None:  # noqa: N802
+            self._dispatch("OPTIONS")
+
         def do_PUT(self) -> None:  # noqa: N802
             self._dispatch("PUT")
 
@@ -408,35 +411,41 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
             url = urlparse(self.path)
             path = unquote(url.path)
             query = {k: v[-1] for k, v in parse_qs(url.query, keep_blank_values=True).items()}
+            head_only = method == "HEAD"
             try:
-                if method not in ("GET", "POST", "DELETE"):
-                    raise ApiError(405, "método não permitido")
                 if not path.startswith("/api/"):
-                    if method != "GET":
+                    if method not in ("GET", "HEAD"):
                         raise ApiError(405, "método não permitido")
-                    self._static(path)
+                    self._static(path, head_only=head_only)
                     return
+                if head_only:
+                    raise ApiError(405, "use GET nas rotas da API")
                 self._check_auth()
+                matched_other = False
                 for route_method, pattern, fn in ROUTES:
-                    if route_method != method:
-                        continue
                     match = pattern.fullmatch(path)
-                    if match:
-                        status, payload = fn(app, self, match, query)
-                        self._send(status, payload)
-                        return
+                    if not match:
+                        continue
+                    if route_method != method:
+                        matched_other = True
+                        continue
+                    status, payload = fn(app, self, match, query)
+                    self._send(status, payload)
+                    return
+                if matched_other:
+                    raise ApiError(405, "método não permitido para este recurso")
                 raise ApiError(404, "rota inexistente")
             except ApiError as exc:
-                self._json(exc.status, {"error": exc.message})
+                self._json(exc.status, {"error": exc.message}, head_only=head_only)
             except PathRejectedError as exc:
-                self._json(400, {"error": str(exc)})
+                self._json(400, {"error": str(exc)}, head_only=head_only)
             except UnsafeArchiveError as exc:
-                self._json(422, {"error": str(exc)})
+                self._json(422, {"error": str(exc)}, head_only=head_only)
             except ArchiveLimitError as exc:
-                self._json(413, {"error": str(exc)})
+                self._json(413, {"error": str(exc)}, head_only=head_only)
             except Exception:
                 traceback.print_exc(file=sys.stderr)
-                self._json(500, {"error": "erro interno"})
+                self._json(500, {"error": "erro interno"}, head_only=head_only)
 
         def _check_auth(self) -> None:
             token = app.settings.token
@@ -471,10 +480,11 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 self.send_header(key, value)
             self.end_headers()
 
-        def _json(self, status: int, payload: Any) -> None:
+        def _json(self, status: int, payload: Any, head_only: bool = False) -> None:
             body = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
             self._headers(status, "application/json; charset=utf-8", len(body))
-            self.wfile.write(body)
+            if not head_only:
+                self.wfile.write(body)
 
         def _send(self, status: int, payload: Any) -> None:
             if isinstance(payload, SseStream):
@@ -515,8 +525,10 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
             except (BrokenPipeError, ConnectionResetError):
                 return
 
-        def _stream(self, path: Path, mime: str, extra: dict[str, str] | None = None) -> None:
+        def _stream(self, path: Path, mime: str, extra: dict[str, str] | None = None, head_only: bool = False) -> None:
             self._headers(200, mime, path.stat().st_size, extra)
+            if head_only:
+                return
             with path.open("rb") as f:
                 while True:
                     chunk = f.read(CHUNK)
@@ -524,7 +536,7 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                         break
                     self.wfile.write(chunk)
 
-        def _static(self, path: str) -> None:
+        def _static(self, path: str, head_only: bool = False) -> None:
             rel = "index.html" if path in ("", "/") else path.lstrip("/")
             try:
                 target = safe_join(WEB_ROOT, rel)
@@ -533,7 +545,7 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
             if not target.is_file():
                 raise ApiError(404, "não encontrado")
             mime = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
-            self._stream(target, mime)
+            self._stream(target, mime, head_only=head_only)
 
     return Handler
 
