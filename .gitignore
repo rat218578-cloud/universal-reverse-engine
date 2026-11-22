@@ -50,3 +50,6 @@ Thumbs.db
 
 # artefatos gerados pelo tauri-build (schemas de capacidades)
 apps/desktop/src-tauri/gen/
+
+# Python embutível opcional do instalador Windows (grande; não versionar)
+apps/desktop/src-tauri/python/
