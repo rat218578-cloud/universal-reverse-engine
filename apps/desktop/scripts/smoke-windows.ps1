@@ -26,6 +26,15 @@ function Wait-Until([scriptblock]$cond, [int]$seconds, [string]$what) {
     while ((Get-Date) -lt $deadline) { if (& $cond) { return }; Start-Sleep -Milliseconds 500 }
     throw "tempo esgotado: $what"
 }
+function Invoke-Timed([string]$file, [string[]]$arguments, [int]$seconds) {
+    # Processo externo com prazo: instaladores podem travar, e um travamento não pode consumir o job.
+    $p = Start-Process -FilePath $file -ArgumentList $arguments -PassThru
+    if (-not $p.WaitForExit($seconds * 1000)) {
+        Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+        throw "tempo esgotado ($seconds s): $file $($arguments -join ' ')"
+    }
+    return $p.ExitCode
+}
 function Port-Open([int]$port) {
     try { Invoke-RestMethod "http://127.0.0.1:$port/api/v1/health" -TimeoutSec 2 | Out-Null; return $true }
     catch { return $false }
@@ -36,7 +45,8 @@ $install = Join-Path $Work "app"
 if (Test-Path $install) { Remove-Item -Recurse -Force $install }
 
 # 1. Instalação silenciosa (NSIS)
-Start-Process -FilePath $Installer -ArgumentList @("/S", "/D=$install") -Wait
+$code = Invoke-Timed $Installer @("/S", "/D=$install") 300
+if ($code -ne 0) { throw "instalador NSIS terminou com código $code" }
 $exe = Join-Path $install "ure-desktop.exe"
 Wait-Until { Test-Path $exe } 60 "instalação do NSIS"
 Record "nsis_installed" $exe
@@ -164,7 +174,8 @@ Stop-Process -Id $api2.Id -Force
 # 6. Desinstalação
 $uninstaller = Join-Path $install "uninstall.exe"
 if (Test-Path $uninstaller) {
-    Start-Process -FilePath $uninstaller -ArgumentList @("/S") -Wait
+    $code = Invoke-Timed $uninstaller @("/S") 300
+    if ($code -ne 0) { throw "desinstalador terminou com código $code" }
     Wait-Until { -not (Test-Path $exe) } 60 "desinstalação"
     Record "uninstalled" $true
 }

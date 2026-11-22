@@ -127,8 +127,13 @@ jobs:
           # MSI: extração administrativa (sem instalar) e conferência do conteúdo
           $extract = Join-Path $env:RUNNER_TEMP "msi-admin"
           New-Item -ItemType Directory -Force -Path $extract | Out-Null
-          $p = Start-Process msiexec -ArgumentList @("/a", $msi.FullName, "/qn", "TARGETDIR=$extract") -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "extração administrativa do MSI falhou (código $($p.ExitCode))" }
+          $msiLog = Join-Path $env:RUNNER_TEMP "msi-admin.log"
+          $p = Start-Process msiexec -ArgumentList @("/a", "`"$($msi.FullName)`"", "/qn", "/L*v", "`"$msiLog`"", "TARGETDIR=`"$extract`"") -PassThru
+          if (-not $p.WaitForExit(300000)) {
+              Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+              throw "extração administrativa do MSI passou de 300 s; log em $msiLog"
+          }
+          if ($p.ExitCode -ne 0) { throw "extração administrativa do MSI falhou (código $($p.ExitCode)); log em $msiLog" }
           $msiExe = Get-ChildItem $extract -Recurse -Filter "ure-desktop.exe" | Select-Object -First 1
           $msiServer = Get-ChildItem $extract -Recurse -Filter "server.py" | Where-Object { $_.FullName -like "*\backend\ure\*" } | Select-Object -First 1
           $msiWeb = Get-ChildItem $extract -Recurse -Filter "index.html" | Where-Object { $_.FullName -like "*\backend\ure\web\*" } | Select-Object -First 1
