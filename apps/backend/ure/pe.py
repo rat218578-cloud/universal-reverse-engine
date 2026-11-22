@@ -168,6 +168,7 @@ def parse_pe(path: Path) -> dict[str, Any]:
         "imports": imports,
         "import_count": total,
         "signed": sec_dir[1] > 0,
+        "clr_runtime": bool(len(dirs) > 14 and dirs[14][1] > 0),
         "overlay_bytes": overlay,
         "warnings": warnings,
     }

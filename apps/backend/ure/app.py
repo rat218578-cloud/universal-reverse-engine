@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
+import time
 import hashlib
 import hmac
 import json
@@ -20,10 +21,13 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from . import __version__
 from .config import MB, Settings
+from .analysis import run_analysis
 from .db import Store, utcnow
 from .files import build_tree, export_project_zip, read_preview
+from .jobs import JobRunner
 from .identify import KIND_APK, KIND_JAR, KIND_PE, KIND_ZIP, UPLOADABLE_KINDS, identify
 from .safezip import ArchiveLimitError, UnsafeArchiveError, safe_extract_zip
+from .tools import probe_all
 from .storage import (
     READ_ROOTS,
     PathRejectedError,
@@ -50,6 +54,15 @@ class ApiError(Exception):
         super().__init__(message)
         self.status = status
         self.message = message
+
+
+@dataclass
+class SseStream:
+    job_id: str
+
+
+TERMINAL = frozenset({"done", "failed", "interrupted"})
+SSE_MAX_SECONDS = 1800
 
 
 @dataclass
@@ -90,6 +103,8 @@ class App:
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         self.store = Store(settings.data_dir / "ure.sqlite3")
         self.store.recover_interrupted_jobs()
+        self.jobs = JobRunner(self.store, settings.job_workers)
+        self.jobs.register("analyze", lambda pid, aid, params, progress: run_analysis(self, pid, aid, params, progress))
 
     def project_or_404(self, pid: str) -> dict[str, Any]:
         if not valid_id(pid):
@@ -267,6 +282,50 @@ def export_artifact(a: App, h: Any, m: Any, q: dict[str, str]) -> tuple[int, Any
     return 200, FileResponse(out, "application/zip", f"{Path(art['filename']).stem}-export.zip")
 
 
+def start_analysis(a: App, h: Any, m: Any, q: dict[str, str]) -> tuple[int, Any]:
+    pid, aid = m.group(1), m.group(2)
+    a.artifact_or_404(pid, aid)
+    params = h.read_json()
+    return 202, a.jobs.submit("analyze", pid, aid, params)
+
+
+def get_job_route(a: App, h: Any, m: Any, q: dict[str, str]) -> tuple[int, Any]:
+    job = a.store.get_job(m.group(1)) if valid_id(m.group(1)) else None
+    if job is None:
+        raise ApiError(404, "job não encontrado")
+    return 200, job
+
+
+def job_events(a: App, h: Any, m: Any, q: dict[str, str]) -> tuple[int, Any]:
+    if not valid_id(m.group(1)) or a.store.get_job(m.group(1)) is None:
+        raise ApiError(404, "job não encontrado")
+    return 200, SseStream(m.group(1))
+
+
+def retry_job(a: App, h: Any, m: Any, q: dict[str, str]) -> tuple[int, Any]:
+    if not valid_id(m.group(1)):
+        raise ApiError(404, "job não encontrado")
+    try:
+        job = a.jobs.retry(m.group(1))
+    except KeyError as exc:
+        raise ApiError(404, "job não encontrado") from exc
+    except ValueError as exc:
+        raise ApiError(409, str(exc)) from exc
+    return 202, job
+
+
+def get_report(a: App, h: Any, m: Any, q: dict[str, str]) -> tuple[int, Any]:
+    art = a.artifact_or_404(m.group(1), m.group(2))
+    path = a.root_of(art["project_id"], art["id"]) / "reports" / "analysis.json"
+    if not path.is_file():
+        raise ApiError(404, "relatório ainda não gerado")
+    return 200, json.loads(path.read_text(encoding="utf-8"))
+
+
+def tools_status(a: App, h: Any, m: Any, q: dict[str, str]) -> tuple[int, Any]:
+    return 200, {"tools": probe_all()}
+
+
 ROUTES: list[tuple[str, re.Pattern[str], Callable[..., tuple[int, Any]]]] = [
     ("GET", re.compile(r"/api/v1/health"), lambda a, h, m, q: (200, {
         "status": "ok", "version": __version__, "ai_enabled": a.settings.ai_enabled,
@@ -282,6 +341,12 @@ ROUTES: list[tuple[str, re.Pattern[str], Callable[..., tuple[int, Any]]]] = [
     ("GET", re.compile(rf"/api/v1/projects/{ID}/artifacts/{ID}/file"), preview_artifact),
     ("POST", re.compile(rf"/api/v1/projects/{ID}/artifacts/{ID}/extract"), extract_artifact),
     ("GET", re.compile(rf"/api/v1/projects/{ID}/artifacts/{ID}/export"), export_artifact),
+    ("POST", re.compile(rf"/api/v1/projects/{ID}/artifacts/{ID}/analyze"), start_analysis),
+    ("GET", re.compile(rf"/api/v1/projects/{ID}/artifacts/{ID}/report"), get_report),
+    ("GET", re.compile(r"/api/v1/jobs/" + ID), get_job_route),
+    ("GET", re.compile(r"/api/v1/jobs/" + ID + "/events"), job_events),
+    ("POST", re.compile(r"/api/v1/jobs/" + ID + "/retry"), retry_job),
+    ("GET", re.compile(r"/api/v1/tools"), tools_status),
 ]
 
 
@@ -381,6 +446,9 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
             self.wfile.write(body)
 
         def _send(self, status: int, payload: Any) -> None:
+            if isinstance(payload, SseStream):
+                self._sse(payload.job_id)
+                return
             if isinstance(payload, FileResponse):
                 extra = {}
                 if payload.filename:
@@ -388,6 +456,33 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 self._stream(payload.path, payload.mime, extra)
             else:
                 self._json(status, payload)
+
+        def _sse(self, jid: str) -> None:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Accel-Buffering", "no")
+            self.send_header("Content-Security-Policy", CSP)
+            self.send_header("Connection", "close")
+            self.end_headers()
+            last: dict[str, Any] | None = None
+            deadline = time.monotonic() + SSE_MAX_SECONDS
+            try:
+                while time.monotonic() < deadline:
+                    job = app.store.get_job(jid) or {}
+                    state = {k: job.get(k) for k in ("status", "progress", "message", "error")}
+                    if state != last:
+                        data = json.dumps(state, ensure_ascii=False)
+                        self.wfile.write(f"event: progress\ndata: {data}\n\n".encode("utf-8"))
+                        self.wfile.flush()
+                        last = state
+                    if state["status"] in TERMINAL:
+                        self.wfile.write(b"event: end\ndata: {}\n\n")
+                        self.wfile.flush()
+                        return
+                    time.sleep(0.5)
+            except (BrokenPipeError, ConnectionResetError):
+                return
 
         def _stream(self, path: Path, mime: str, extra: dict[str, str] | None = None) -> None:
             self._headers(200, mime, path.stat().st_size, extra)

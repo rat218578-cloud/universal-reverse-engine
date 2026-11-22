@@ -19,12 +19,12 @@ CREATE TABLE IF NOT EXISTS artifacts(
 CREATE TABLE IF NOT EXISTS jobs(
   id TEXT PRIMARY KEY, project_id TEXT NOT NULL, artifact_id TEXT NOT NULL, kind TEXT NOT NULL,
   status TEXT NOT NULL, progress REAL NOT NULL DEFAULT 0, message TEXT NOT NULL DEFAULT '',
-  error TEXT, result TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+  error TEXT, params TEXT NOT NULL DEFAULT '{}', result TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS ai_cache(
   key TEXT PRIMARY KEY, model TEXT NOT NULL, response TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS ai_usage(day TEXT PRIMARY KEY, calls INTEGER NOT NULL DEFAULT 0);
 """
-JSON_FIELDS = ("details", "result")
+JSON_FIELDS = ("details", "result", "params")
 
 
 def utcnow() -> str:
@@ -108,7 +108,13 @@ class Store:
     # jobs
     def create_job(self, row: dict[str, Any]) -> dict[str, Any]:
         now = utcnow()
-        row = {**row, "created_at": now, "updated_at": now, "result": "{}"}
+        row = {
+            **row,
+            "created_at": now,
+            "updated_at": now,
+            "result": "{}",
+            "params": json.dumps(row.get("params", {}), ensure_ascii=False),
+        }
         cols = ",".join(row)
         marks = ",".join("?" for _ in row)
         self._run(f"INSERT INTO jobs({cols}) VALUES({marks})", tuple(row.values()))
