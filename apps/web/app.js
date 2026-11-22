@@ -417,14 +417,13 @@ async function route() {
 }
 
 // Modo desktop: o lançador (Tauri) injeta o token local antes da página carregar.
-// Na versão web esta condição é falsa e o comportamento não muda.
-const desktopToken = window.URE_DESKTOP && typeof window.URE_DESKTOP.token === "string"
-  ? window.URE_DESKTOP.token.trim()
-  : "";
-if (desktopToken) {
-  setToken(desktopToken);
-  const field = document.querySelector("#token");
-  if (field) field.value = desktopToken;
+// Lido uma vez, guardado só no módulo api.js e removido do objeto global. Na versão web
+// a variável não existe e este bloco não faz nada.
+const desktopConfig = window.URE_DESKTOP;
+if (desktopConfig) {
+  const desktopToken = typeof desktopConfig.token === "string" ? desktopConfig.token.trim() : "";
+  delete window.URE_DESKTOP;
+  if (desktopToken) setToken(desktopToken);
 }
 
 window.addEventListener("hashchange", route);
