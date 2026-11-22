@@ -23,6 +23,7 @@ from . import __version__
 from .config import MB, Settings
 from .ai import AIError, AIRouter
 from .analysis import run_analysis
+from .gitexport import GitUnavailable, export_local_repo
 from .db import Store, utcnow
 from .files import build_tree, export_project_zip, read_preview
 from .jobs import JobRunner
@@ -352,6 +353,22 @@ def ask_artifact(a: App, h: Any, m: Any, q: dict[str, str]) -> tuple[int, Any]:
     return 200, result
 
 
+def git_export(a: App, h: Any, m: Any, q: dict[str, str]) -> tuple[int, Any]:
+    art = a.artifact_or_404(m.group(1), m.group(2))
+    root = a.root_of(art["project_id"], art["id"])
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+    try:
+        result = export_local_repo(
+            [("extracted", root / "extracted"), ("decompiled", root / "decompiled")],
+            root / "exports" / f"git-{stamp}",
+        )
+    except GitUnavailable as exc:
+        raise ApiError(503, str(exc)) from exc
+    if not result["commits"]:
+        raise ApiError(409, "nada para versionar: extraia ou decompile o artefato antes")
+    return 201, result
+
+
 ROUTES: list[tuple[str, re.Pattern[str], Callable[..., tuple[int, Any]]]] = [
     ("GET", re.compile(r"/api/v1/health"), lambda a, h, m, q: (200, {
         "status": "ok", "version": __version__, "ai_enabled": a.settings.ai_enabled,
@@ -375,6 +392,7 @@ ROUTES: list[tuple[str, re.Pattern[str], Callable[..., tuple[int, Any]]]] = [
     ("GET", re.compile(r"/api/v1/tools"), tools_status),
     ("GET", re.compile(r"/api/v1/ai/status"), ai_status),
     ("POST", re.compile(rf"/api/v1/projects/{ID}/artifacts/{ID}/ask"), ask_artifact),
+    ("POST", re.compile(rf"/api/v1/projects/{ID}/artifacts/{ID}/git-export"), git_export),
 ]
 
 

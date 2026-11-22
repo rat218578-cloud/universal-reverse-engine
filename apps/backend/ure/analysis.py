@@ -9,6 +9,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from .compliance import scan_licenses, size_summary
 from .engines import apkanalyzer_manifest, apktool_decode, ghidra_analyze, ilspy_decompile, jadx_decompile
 from .files import sha256_file
 from .identify import KIND_APK, KIND_JAR, KIND_PE, KIND_ZIP
@@ -69,6 +70,12 @@ def run_analysis(app: Any, pid: str, aid: str, params: dict[str, Any], progress:
     report["secrets"] = (
         scan_secrets(extracted) if extracted.is_dir() else {"files_scanned": 0, "findings": [], "truncated": False}
     )
+    if extracted.is_dir():
+        report["compliance"] = {
+            "licenses": scan_licenses(extracted),
+            "size": size_summary(extracted),
+            "limit_bytes": app.settings.max_extract_bytes,
+        }
     out = root / "reports" / "analysis.json"
     out.write_text(json.dumps(report, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     progress(1.0, "relatório gerado")

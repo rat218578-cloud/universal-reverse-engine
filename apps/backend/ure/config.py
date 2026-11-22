@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 MB = 1024 * 1024
@@ -26,6 +26,9 @@ class Settings:
     ai_daily_budget: int = 50
     job_workers: int = 1
     ollama_model: str = "llama3.2"
+    external_ai_url: str | None = None
+    external_ai_model: str = "default"
+    external_ai_key: str | None = field(default=None, repr=False)
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -49,6 +52,9 @@ class Settings:
             ai_daily_budget=num("URE_AI_DAILY_BUDGET", 50),
             job_workers=num("URE_JOB_WORKERS", 1),
             ollama_model=env.get("URE_OLLAMA_MODEL", "llama3.2"),
+            external_ai_url=env.get("URE_EXTERNAL_AI_URL") or None,
+            external_ai_model=env.get("URE_EXTERNAL_AI_MODEL", "default"),
+            external_ai_key=env.get("URE_EXTERNAL_AI_KEY") or None,
         )
 
     def check_bind(self) -> None:

@@ -117,10 +117,10 @@ class AiFlowTests(ApiCase):
         s = Settings(data_dir=self.tmp / "d2", ai_enabled=True, ollama_url=closed_port_url())
         router = AIRouter(s, Store(self.tmp / "d2" / "x.sqlite3"))
         with self.assertRaises(AIError) as c1:
-            router.ask("x", {}, provider="openai", model=None, consent=False)
+            router.ask("x", {}, provider="openai-compatible", model=None, consent=False)
         self.assertEqual(c1.exception.status, 403)
         with self.assertRaises(AIError) as c2:
-            router.ask("x", {}, provider="openai", model=None, consent=True)
+            router.ask("x", {}, provider="openai-compatible", model=None, consent=True)
         self.assertEqual(c2.exception.status, 501)
 
     def test_ollama_unreachable_is_reported_not_faked(self) -> None:
