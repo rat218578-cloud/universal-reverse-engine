@@ -6,7 +6,6 @@ build-backend = "setuptools.build_meta"
 name = "universal-reverse-engine"
 version = "1.0.0rc1"
 description = "Plataforma local de engenharia reversa para APK e EXE/DLL: upload seguro, análise, extração e relatórios."
-readme = "../../README.md"
 requires-python = ">=3.11"
 dependencies = []
 classifiers = [
