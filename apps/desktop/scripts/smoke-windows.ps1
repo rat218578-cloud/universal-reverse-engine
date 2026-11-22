@@ -41,6 +41,14 @@ function Port-Open([int]$port) {
 }
 
 New-Item -ItemType Directory -Force -Path $Work | Out-Null
+Start-Transcript -Path (Join-Path $Work "smoke-transcript.txt") -Force | Out-Null
+# Qualquer erro vira anotação com a linha, e os resultados parciais são gravados.
+trap {
+    Write-Output "::error title=smoke-windows::$($_.Exception.Message) (linha $($_.InvocationInfo.ScriptLineNumber))"
+    try { $results | ConvertTo-Json -Depth 8 | Set-Content -Path (Join-Path $Work "smoke-results.json") -Encoding utf8 } catch { }
+    try { Stop-Transcript | Out-Null } catch { }
+    exit 1
+}
 $install = Join-Path $Work "app"
 if (Test-Path $install) { Remove-Item -Recurse -Force $install }
 
@@ -181,4 +189,5 @@ if (Test-Path $uninstaller) {
 }
 
 $results | ConvertTo-Json -Depth 8 | Set-Content -Path (Join-Path $Work "smoke-results.json") -Encoding utf8
+Stop-Transcript | Out-Null
 Write-Host "SMOKE OK: $($results.Count) verificações"

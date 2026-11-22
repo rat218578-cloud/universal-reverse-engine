@@ -152,15 +152,41 @@ jobs:
               -Work (Join-Path $env:RUNNER_TEMP "ure-smoke") `
               -Python python
 
+      - name: Publicar a transcrição do teste de instalação (check run) em caso de falha
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = `${process.env.RUNNER_TEMP}/ure-smoke/smoke-transcript.txt`;
+            const text = fs.existsSync(path) ? fs.readFileSync(path, 'utf8') : 'transcrição ausente';
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'Windows smoke: transcrição da instalação',
+              head_sha: context.sha,
+              status: 'completed',
+              conclusion: 'neutral',
+              output: {
+                title: 'Teste de instalação Windows: falha',
+                summary: 'Transcrição completa do teste (últimos caracteres).',
+                text: text.slice(-60000),
+              },
+            });
+
       - name: Copiar instaladores para a pasta de artifacts
+        if: always()
         run: |
           New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP/out" | Out-Null
           Copy-Item "apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe" "$env:RUNNER_TEMP/out/"
           Copy-Item "apps/desktop/src-tauri/target/release/bundle/msi/*.msi" "$env:RUNNER_TEMP/out/"
-          Copy-Item (Join-Path $env:RUNNER_TEMP "ure-smoke/smoke-results.json") "$env:RUNNER_TEMP/out/"
+          if (Test-Path (Join-Path $env:RUNNER_TEMP "ure-smoke/smoke-results.json")) {
+              Copy-Item (Join-Path $env:RUNNER_TEMP "ure-smoke/smoke-results.json") "$env:RUNNER_TEMP/out/"
+          }
           Get-ChildItem "$env:RUNNER_TEMP/out" | Format-Table Name, Length
 
       - name: Artifact — instalador NSIS (.exe)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: universal-reverse-engine-windows-nsis
@@ -169,6 +195,7 @@ jobs:
           retention-days: 14
 
       - name: Artifact — instalador MSI (.msi)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: universal-reverse-engine-windows-msi
