@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Universal Reverse Engine</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="#/">Universal Reverse Engine</a>
+    <nav><a href="#/tools">Ferramentas e IA</a></nav>
+    <span id="health" class="pill">verificando…</span>
+    <label class="token">Token
+      <input id="token" type="password" autocomplete="off" placeholder="opcional (URE_TOKEN)">
+    </label>
+  </header>
+  <main id="app" aria-live="polite"></main>
+  <div id="toast" role="status"></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
