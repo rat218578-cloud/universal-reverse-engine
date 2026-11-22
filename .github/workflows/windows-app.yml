@@ -103,7 +103,15 @@ jobs:
         working-directory: apps/desktop/src-tauri
         run: cargo test --locked
 
+      - name: Cache do tauri-cli
+        id: tauri-cli-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-tauri.exe
+          key: tauri-cli-2-windows-2022-v1
+
       - name: Instalar tauri-cli 2.x
+        if: steps.tauri-cli-cache.outputs.cache-hit != 'true'
         run: cargo install tauri-cli --version "^2" --locked
 
       - name: Gerar instaladores NSIS e MSI
