@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Universal Reverse Engine",
+  "version": "0.1.0",
+  "identifier": "dev.ure.desktop",
+  "build": { "frontendDist": "../../web" },
+  "app": {
+    "windows": [{ "title": "Universal Reverse Engine", "width": 1280, "height": 820 }],
+    "security": { "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:8765" }
+  },
+  "bundle": { "active": false }
+}
