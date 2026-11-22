@@ -7,3 +7,9 @@ node_modules/
 target/
 .env
 *.log
+
+# artefatos de distribuição
+dist/
+build/
+*.egg-info/
+apps/backend/ure/web/

@@ -7,8 +7,18 @@ from tests.test_security import forge_central_sizes
 DATA = Path(tempfile.mkdtemp(prefix="ure-e2e-"))
 PORT = 8794
 env = dict(os.environ, URE_DATA_DIR=str(DATA), URE_PORT=str(PORT), URE_SOCKET_TIMEOUT_S="2")
-srv = subprocess.Popen([sys.executable, "-m", "ure.server"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-time.sleep(2)
+PYTHON = os.environ.get("URE_E2E_PYTHON", sys.executable)
+if "URE_E2E_PYTHON" not in os.environ:
+    # código-fonte: o pacote fica em apps/backend, que não é o diretório de dados
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
+srv = subprocess.Popen([PYTHON, "-m", "ure.server"], env=env, cwd=str(DATA), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+for _ in range(100):
+    if (DATA / "session.token").is_file() or srv.poll() is not None:
+        break
+    time.sleep(0.1)
+if srv.poll() is not None or not (DATA / "session.token").is_file():
+    err = srv.communicate(timeout=10)[1].decode(errors="replace")
+    raise SystemExit("servidor não iniciou:\n" + err[-2000:])
 B = f"http://127.0.0.1:{PORT}"
 TOKEN = (DATA / "session.token").read_text().strip()
 AUTH = {"Authorization": f"Bearer {TOKEN}"}

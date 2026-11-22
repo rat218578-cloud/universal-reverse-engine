@@ -53,7 +53,18 @@ from .storage import (
 )
 from .tools import probe_all
 
-WEB_ROOT = Path(__file__).resolve().parents[2] / "web"
+def _resolve_web_root() -> Path:
+    """Interface: URE_WEB_DIR, depois a cópia empacotada (wheel), depois o repositório (desenvolvimento)."""
+    env = os.environ.get("URE_WEB_DIR")
+    if env:
+        return Path(env).expanduser().resolve()
+    packaged = Path(__file__).resolve().parent / "web"
+    if (packaged / "index.html").is_file():
+        return packaged
+    return Path(__file__).resolve().parents[2] / "web"
+
+
+WEB_ROOT = _resolve_web_root()
 CHUNK = MB
 JSON_LIMIT = 64 * 1024
 EXTRACTABLE = frozenset({KIND_APK, KIND_JAR, KIND_ZIP})

@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "universal-reverse-engine"
+version = "1.0.0rc1"
+description = "Plataforma local de engenharia reversa para APK e EXE/DLL: upload seguro, análise, extração e relatórios."
+readme = "../../README.md"
+requires-python = ">=3.11"
+dependencies = []
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: POSIX :: Linux",
+  "Development Status :: 4 - Beta",
+]
+
+[project.scripts]
+ure-server = "ure.server:main"
+
+[tool.setuptools.packages.find]
+include = ["ure*"]
+
+[tool.setuptools.package-data]
+ure = ["web/*"]
