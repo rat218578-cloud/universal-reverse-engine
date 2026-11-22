@@ -1,10 +1,14 @@
-# Status do Universal Reverse Engine
+# Status do Universal Reverse Engine — 1.0.0rc1 (Release Candidate)
 
-Branch de trabalho: `security/correcao-auditoria` (criada a partir de `develop`). `main` intacta em `1905f54`.
+Branch: `release/1.0.0` (a partir de `security/correcao-auditoria`). `main` intacta em `1905f54`. `develop` em `92cf9c1`.
+Instalação e execução: `INSTALL.md`. Histórico de mudanças: `CHANGELOG.md`.
 
-Verificação mais recente: **130 testes Python** (unittest), **4 testes Node** e **22 verificações HTTP** ponta a ponta
-(`apps/backend/scripts/e2e_security.py`). Todos passam. Este número não equivale a segurança completa: ver
-`docs/AUDIT.md`, seção "Vulnerabilidades que continuam abertas".
+Verificação do candidato: **130 testes Python**, **4 testes Node**, **22 verificações E2E** com servidor real (fonte e wheel
+instalado), **18 chamadas da interface** coerentes com as rotas da API. Testado apenas em Linux, Python 3.12.3.
+
+**Status de lançamento:** é um candidato, não uma versão de produção. Motores externos não foram executados com ferramenta
+real; a interface não foi testada em navegador; Windows e macOS não foram testados. A lista completa está em "Limitações
+conhecidas" no `CHANGELOG.md` e em `docs/AUDIT.md`.
 
 ## Segurança após a correção da auditoria
 

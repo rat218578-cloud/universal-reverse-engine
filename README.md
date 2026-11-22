@@ -15,6 +15,9 @@ python3 -m unittest discover -s tests -t . -v
 cd ../web && npm test          # testes puros da interface (Node 22+)
 ```
 
+## Versão
+1.0.0rc1 (Release Candidate). Instalação: `INSTALL.md`. Mudanças: `CHANGELOG.md`.
+
 ## Estrutura
 - `apps/backend/ure`: núcleo do backend
 - `apps/backend/tests`: testes unitários, de integração e de segurança
