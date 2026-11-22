@@ -1,109 +1,90 @@
 # Status do Universal Reverse Engine
 
-Última verificação local: 59 testes Python (unittest) e 4 testes Node (node --test), todos passando.
-O servidor foi executado em HTTP real com um PE real e o fluxo completo foi verificado com curl.
+Verificação local mais recente: **86 testes Python** (unittest) e **4 testes Node** (node --test), todos passando.
+Teste HTTP completo executado contra o servidor real, com o PE real `w32.exe` e um APK sintético.
 
-## Fases
+## 1. Implementado e testado
+- Upload de APK e EXE/DLL: limite de tamanho (413), formato validado pelo conteúdo (415), SHA-256 em streaming, original somente leitura.
+- Identificação por assinatura: APK, JAR, ZIP, PE, ELF, Mach-O, DEX, corrompidos.
+- Tipos Unix de ZIP (`S_IFMT`): regular aceito; FIFO, dispositivo e link ignorados.
+- Extração segura: traversal, caminhos absolutos, byte nulo, duplicatas, links, limites de entradas e bytes.
+- ZIP bomb: checagem da razão **declarada** e da razão **medida** durante a escrita (testadas com fluxo injetado).
+- Árvore, prévia (texto e hex), bloqueio de traversal e de links em todas as rotas de arquivo.
+- Exportação ZIP com MANIFEST.json; original só com `include_original=1`.
+- Rotas HTTP: página inicial em GET e HEAD (200); 405 em JSON para métodos errados, inclusive em rotas conhecidas e OPTIONS; 404 para rotas inexistentes; 400 para IDs inválidos.
+- Analisador PE próprio (biblioteca padrão), validado com `w32.exe` real: 84 importações de KERNEL32, 6 de USER32, 3 de SHLWAPI.
+- Jobs persistidos com progresso (SSE), nova tentativa só para falhos/interrompidos, recuperação após reinício.
+- Varredura de segredos com valores mascarados (nenhum valor completo em relatório, interface ou contexto de IA).
+- Autenticação por token opcional; bind fora de loopback exige token.
+- Exclusão de projeto exige digitar o nome.
+- Verificação de licenças por texto e resumo de tamanho (indicativo, não é parecer jurídico).
+- Exportação para repositório Git **local** com um commit por fonte; sem remoto, nenhum push.
+- Interface web sem build: painel, projetos, envio, progresso, relatório, árvore, prévia, extração, exportação. Módulos puros testados com node.
+- Medição real: servidor com análise de PE em **26,6 MB** de pico de RSS.
 
-| Fase | Escopo | Situação |
-|---|---|---|
-| 0 | Estrutura do monorepo, configuração, documentação inicial, CI | Concluída (CI configurado, não executado no GitHub) |
-| 1 | Projetos, upload, identificação real, SHA-256, extração segura, árvore, prévia, exportação ZIP | Concluída e testada |
-| 2 | Jobs persistidos, progresso SSE, registro de ferramentas, adaptadores, limites de tempo e memória | Concluída; motores externos não instalados neste ambiente |
-| 3 | Análise PE/APK/JAR, dependências, indicadores, varredura de segredos, relatórios | Concluída e testada |
-| 4 | IA opcional: Ollama local, consentimento, cache, orçamento | Concluída; Ollama real não testado (ver limitações) |
-| 5 | Interface web (HTML/CSS/JS sem build) servida pelo backend | Concluída; testes unitários do JS e checagem de sintaxe, sem navegador |
-| 6 | Documentação, CI, verificação final | Concluída |
+## 2. Implementado, mas não testado com ferramenta real
+- **apktool**: adaptador e parsing de saída. Ferramenta ausente; registrada como `missing`.
+- **JADX**: adaptador e contagem de `.java`. Ausente.
+- **apkanalyzer**: adaptador, saída em `reports/`. Ausente.
+- **ILSpy (ilspycmd)**: adaptador para assemblies .NET, acionado quando o PE tem runtime CLR. Ausente.
+- **Ghidra analyzeHeadless**: adaptador em análise profunda (`deep=true`); saída só em log. Ausente.
+- **LIEF**: apenas detecção. O analisador PE próprio é o que está em uso.
+- **Adaptador de IA externa (OpenAI-compatível)**: testado contra servidor falso em loopback, não contra um provedor real.
+- **Ollama**: testado contra servidor falso que imita `/api/tags` e `/api/generate`. Sem modelo real.
+- **Dockerfile**: escrito, **não construído**. Docker ausente.
+- **Esqueleto Tauri (apps/desktop)**: escrito, **não compilado**. Rust ausente.
+- **CI (.github/workflows/ci.yml)**: escrito, **não executado**. Não há remoto.
 
-Desktop (Tauri), Docker, criação de repositório privado no GitHub e commits automatizados
-**não foram concluídos**, pelos motivos listados em "Limitações".
+## 3. Parcial
+- **Dependências**: DEX, bibliotecas nativas, ABIs, assinaturas e JARs embutidos para APK; DLLs importadas para PE. Permissões do manifesto não são extraídas, porque o AXML binário não é decodificado pelo URE.
+- **Análise de código e arquitetura**: só indicadores estáticos e contagens. Não há grafo de chamadas nem análise de arquitetura.
+- **Ghidra**: executa importação e auto-análise, sem exportar resultados estruturados.
+- **Interface**: sem teste em navegador real; só sintaxe, módulos puros e entrega dos arquivos.
+- **Limite de memória**: RLIMIT_AS só em POSIX. Sem limite de CPU separado; o tempo limite cobre o caso.
+- **Repositório Git**: local apenas. Não há criação de repositório no GitHub nem commits automatizados em remoto.
 
-## Funcionalidades realmente implementadas e testadas
-- Upload de APK e EXE/DLL com limite de tamanho (413) e identificação pelo conteúdo (415 para formato não aceito).
-- Original gravado somente leitura; SHA-256 calculado durante a escrita e reverificado antes de cada análise.
-- Identificação real por assinatura: APK, JAR, ZIP, PE, ELF, Mach-O, DEX, corrompidos.
-- Analisador PE próprio (biblioteca padrão): arquitetura, subsistema, seções com entropia, importações (lidas do arquivo real), overlay, assinatura, runtime CLR.
-- Extração segura: traversal, caminhos absolutos, byte nulo, nomes duplicados, links simbólicos (ignorados), ZIP bomb (razão declarada e medida), limites de entradas e de bytes.
-- Árvore e prévia de arquivos sem seguir links; bloqueio de traversal em todas as rotas.
-- Exportação ZIP com MANIFEST.json (SHA-256 por arquivo); original incluído somente com `include_original=1`.
-- Jobs em thread pool com progresso persistido; falhas capturadas na fronteira do job; nova tentativa só para jobs falhos ou interrompidos; jobs interrompidos por reinício são marcados como `interrupted`.
-- Progresso em tempo real via Server-Sent Events.
-- Registro de ferramentas com detecção real (PATH ou variável `URE_<FERRAMENTA>`), versão e status `available`/`missing`.
-- Execução de motores com tempo limite e limite de memória virtual (RLIMIT_AS, POSIX), sem shell.
-- Varredura de segredos com regras conhecidas; valores sempre mascarados, inclusive no relatório e no contexto da IA.
-- Autenticação por token opcional (`URE_TOKEN`); bind fora de loopback recusado sem token.
-- Exclusão de projeto exige digitar o nome (`X-Confirm-Delete`).
-- IA opcional, desligada por padrão; consentimento obrigatório para provedores externos; cache por hash de (modelo, versão, pergunta, contexto); orçamento diário.
+## 4. Não implementado
+- Chat com memória entre perguntas. Cada pergunta é independente, com evidências E1–E4.
+- Criação de repositórios privados no GitHub, push e publicação.
+- Gerenciamento de usuários e sessões. Só há um token.
+- Suporte a Mach-O e ELF na análise (são identificados, não analisados).
+- Desktop empacotado para Windows.
+- Auto-atualização, assinatura de binários e instaladores.
 
-## Ferramentas e versões neste ambiente
-| Ferramenta | Situação | Observação |
-|---|---|---|
-| Python | 3.12.3 | sem dependências externas |
-| Node.js | 22.23.5 | só para testes da interface |
-| Java | 21.0.13 (detectado) | requisito de JADX, apktool e ILSpy |
-| apktool | ausente | sem rede para instalar; adaptador pronto |
-| JADX | ausente | sem rede; adaptador pronto |
-| apkanalyzer (Android SDK) | ausente | adaptador pronto |
-| ILSpy (ilspycmd) | ausente | adaptador pronto |
-| Ghidra (analyzeHeadless) | ausente | adaptador pronto |
-| LIEF | ausente | não usado: o analisador PE próprio cobre a triagem |
-| Docker, Ollama, GitHub CLI, Rust/Tauri | ausentes | |
+## 5. Bloqueado por falta de rede ou ferramentas
+- Instalação de apktool, JADX, apkanalyzer, ILSpy, Ghidra, LIEF, Ollama e modelos locais.
+- Docker (build e execução do Dockerfile).
+- Rust e Tauri (build do desktop).
+- GitHub CLI e acesso ao GitHub (repositório privado e CI remoto).
+- Navegador headless para testes de interface.
+- APK e DEX reais: nenhum existe neste ambiente. Os testes de APK usam estruturas sintéticas.
 
-Quando uma ferramenta está ausente, o relatório registra `"status": "missing"` com o motivo.
-Nenhum resultado de ferramenta ausente é simulado.
+## Testes sintéticos vs. reais
+| Teste | Tipo de arquivo |
+|---|---|
+| PE `w32.exe` (análise, upload, export, HTTP) | **real** (launcher do pip, presente no sistema) |
+| ELF `/usr/bin/ls` (identificação) | **real** |
+| PE mínimo com importação de `KERNEL32!ExitProcess` | sintético, montado byte a byte |
+| APK, JAR, ZIPs com traversal, symlink, duplicata, bomba | sintéticos |
+| Fluxo HTTP de APK (upload, extração, árvore, prévia, export, git) | sintético |
+| Servidor Ollama e provedor OpenAI-compatível | **test doubles** em loopback |
 
-## Consumo de memória medido
-Servidor real (`python3 -m ure.server`) analisando o PE real `w32.exe`: 26,5 MB de RSS, pico de 26,6 MB
-(VmHWM). Medido em Linux, com um worker de job.
-
-## Testes
-- `apps/backend`: `python3 -m unittest discover -s tests -t . -v`
-  - identificação (PE real `w32.exe`, ELF real `/usr/bin/ls`, PE sintético, ZIP, JAR, corrompidos)
-  - extração segura (traversal, symlink, duplicata, limites, bomba com razão declarada e medida)
-  - caminhos e identificadores (traversal, symlink em componente, ids inválidos)
-  - API HTTP: fluxo completo, upload recusado (415/413), exclusão com confirmação, autenticação por token
-  - motores e jobs: limite real de tempo, limite real de memória, análise de APK e PE, SSE, integridade adulterada, nova tentativa, recuperação após reinício
-  - IA: desligada por padrão, consentimento, Ollama indisponível, cache, orçamento, modelo ausente
-  - entrega estática da interface, CSP e traversal estático
-- `apps/web`: `npm test` (parser SSE e formatação)
-
-Os testes que usam arquivos sintéticos (APK, PE sintético) validam a lógica, não a compatibilidade
-com ferramentas reais. O único PE real testado é `w32.exe` (launcher do pip). Não há APK nem DEX reais
-disponíveis neste ambiente.
+Os `skipTest` existentes só disparam quando o recurso real não existe. Neste ambiente, o PE real está presente e
+nenhum teste de PE é pulado.
 
 ## Como executar
 ```
 cd apps/backend
-python3 -m ure.server                 # http://127.0.0.1:8765
+python3 -m ure.server                                  # http://127.0.0.1:8765
 python3 -m unittest discover -s tests -t . -v
-
-# opcionais
-URE_TOKEN=um-segredo-longo python3 -m ure.server     # exige token nas rotas /api
-URE_AI_ENABLED=1 URE_OLLAMA_MODEL=llama3.2 python3 -m ure.server   # requer Ollama em 127.0.0.1:11434
-URE_APKTOOL=/caminho/apktool URE_JADX=/caminho/jadx python3 -m ure.server
+cd ../web && npm test
 ```
-Abra `http://127.0.0.1:8765` no navegador.
-
-## Limitações conhecidas
-1. **Motores externos não validados contra as ferramentas reais.** Apktool, JADX, apkanalyzer, ILSpy e Ghidra não estão instalados aqui e não há rede para baixá-los. Os adaptadores e o registro de status estão implementados, mas o caminho de sucesso (decompilação real) não foi executado.
-2. **Sem APK ou DEX reais para teste.** A validação de APK usa estruturas sintéticas. O manifesto binário (AXML) não é decodificado pelo URE; sem apktool ou apkanalyzer, as permissões não são extraídas.
-3. **Ghidra** é executado apenas em análise profunda (`deep=true`); a saída detalhada fica no log, sem exportação de decompilação.
-4. **Limite de memória** via RLIMIT_AS só existe em POSIX. No Windows não há limite aplicado, e o relatório informa `memory_limit_applied: false`. Não há limite de CPU separado; o tempo limite cobre o caso.
-5. **Ollama real não testado.** O roteador foi testado contra um servidor falso em loopback que imita as rotas `/api/tags` e `/api/generate`. Provedores externos **não estão implementados** (retornam 501).
-6. **Interface não exercitada em navegador.** Foram verificados sintaxe, módulos puros e a entrega dos arquivos. Não houve teste de interação real.
-7. **Desktop (Tauri) não construído.** Não há Rust nem rede. A interface web é a única superfície entregue.
-8. **Docker não entregue.** Sem Docker disponível neste ambiente, não há Dockerfile testado.
-9. **CI configurado, não executado.** `.github/workflows/ci.yml` existe, mas só roda após push para um remoto.
-10. **Sem repositório no GitHub.** Não há `gh` nem rede. O projeto é local.
-11. **Autenticação é um único token**, sem usuários nem sessões. Adequado para uso local.
-12. **Sem criação de repositórios, commits automatizados ou publicação**, conforme a política de não publicar sem confirmação.
-13. **Varredura de segredos** usa regras de padrão conhecido; não substitui ferramenta dedicada e pode ter falsos positivos e negativos.
-14. **Indicadores de importação** (ex.: `CreateRemoteThread`) são indicadores estáticos e não comprovam comportamento malicioso.
+Variáveis úteis: `URE_TOKEN`, `URE_AI_ENABLED=1`, `URE_OLLAMA_MODEL`, `URE_EXTERNAL_AI_URL` + `URE_EXTERNAL_AI_KEY`
+(só com `consent=true` por requisição), `URE_APKTOOL`, `URE_JADX`, `URE_APKANALYZER`, `URE_ILSPYCMD`, `URE_GHIDRA`.
 
 ## Próximos passos
-1. Instalar apktool, JADX e apkanalyzer (ou fornecer os binários) e rodar a análise de um APK real.
-2. Testar a interface em navegador real (ex.: Playwright) com um fluxo de envio, análise e exportação.
-3. Validar o servidor Ollama real com um modelo local e medir latência e uso de memória.
-4. Criar um remoto privado no GitHub e executar o CI.
-5. Empacotar o desktop com Tauri 2 apontando para o backend local, com verificação de integridade do binário.
-6. Adicionar Dockerfile e testá-lo em uma máquina com Docker.
+1. Instalar apktool, JADX e apkanalyzer e validar a análise de um APK real.
+2. Validar Ollama com um modelo local real e medir latência e memória.
+3. Testar a interface em navegador real.
+4. Construir o Dockerfile e o desktop em máquina com as ferramentas.
+5. Criar remoto privado e executar o CI, somente após confirmação.
