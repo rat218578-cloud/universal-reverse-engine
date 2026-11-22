@@ -14,3 +14,36 @@ build/
 *.egg-info/
 apps/backend/ure/web/
 dist-validation/
+
+# configuração real do usuário (pode conter chaves; o modelo ure.env.example continua versionado)
+ure.env
+ure.env.*
+!ure.env.example
+
+# tokens de sessão, bancos e segredos
+session.token
+*.token
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.pem
+*.key
+
+# artefatos de distribuição e de validação (vão à Release, não ao histórico)
+*.whl
+*.tar.gz
+dist-validation/
+
+# saídas de teste e de ferramentas
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+ure-validation-shots/
+
+# editores e sistema
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.swp
