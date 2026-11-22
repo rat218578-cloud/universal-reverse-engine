@@ -15,7 +15,7 @@ from contextlib import redirect_stderr
 from pathlib import Path
 from unittest import mock
 
-from tests.helpers import make_zip
+from tests.helpers import make_stub, make_zip
 from tests.test_api import ApiCase
 from ure.config import Settings
 from ure.tools import SPECS_BY_KEY, probe, run_tool
@@ -31,11 +31,11 @@ class ToolOutputTests(unittest.TestCase):
 
     def test_java_version_skips_jvm_warning_lines(self) -> None:
         """RC: a versão exibida era 'Picked up JAVA_TOOL_OPTIONS...' (primeira linha do stderr)."""
-        stub = self.tmp / "java-stub"
-        stub.write_text("#!/bin/sh\n"
-                        "echo 'Picked up JAVA_TOOL_OPTIONS: -Dteste=1' >&2\n"
-                        "echo 'openjdk version \"21.0.1\" 2023-10-17' >&2\n")
-        stub.chmod(0o755)
+        stub = make_stub(self.tmp / "java-stub",
+                         ["echo 'Picked up JAVA_TOOL_OPTIONS: -Dteste=1' >&2",
+                          "echo 'openjdk version \"21.0.1\" 2023-10-17' >&2"],
+                         ["echo Picked up JAVA_TOOL_OPTIONS: -Dteste=1 1>&2",
+                          "echo openjdk version \"21.0.1\" 2023-10-17 1>&2"])
         with mock.patch.dict(os.environ, {"URE_JAVA": str(stub)}):
             info = probe(SPECS_BY_KEY["java"])
         self.assertEqual(info["status"], "available")

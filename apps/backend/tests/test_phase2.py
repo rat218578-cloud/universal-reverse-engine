@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tests.helpers import AWS_EXAMPLE_KEY, find_real_pe, synthetic_apk, synthetic_pe32
+from tests.helpers import AWS_EXAMPLE_KEY, find_real_pe, make_stub, synthetic_apk, synthetic_pe32
 from tests.test_api import ApiCase
 from ure.app import App
 from ure.config import Settings
@@ -41,9 +41,7 @@ class ToolRegistryTests(unittest.TestCase):
 
     def test_env_override_plumbing_with_stub_binary(self) -> None:
         # Teste de integração do mecanismo de detecção: o binário é um stub de TESTE, não o apktool.
-        stub = self.tmp / "stub-tool"
-        stub.write_text("#!/bin/sh\necho 'stub-de-teste 0.0'\n")
-        stub.chmod(0o755)
+        stub = make_stub(self.tmp / "stub-tool", ["echo 'stub-de-teste 0.0'"], ["echo stub-de-teste 0.0"])
         with mock.patch.dict(os.environ, {"URE_APKTOOL": str(stub)}):
             info = probe(SPECS_BY_KEY["apktool"])
         self.assertEqual(info["status"], "available")

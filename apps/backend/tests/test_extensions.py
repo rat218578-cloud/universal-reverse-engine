@@ -11,7 +11,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from tests.helpers import AWS_EXAMPLE_KEY, synthetic_apk
+from tests.helpers import AWS_EXAMPLE_KEY, SYMLINK_SKIP_REASON, can_create_symlinks, synthetic_apk
 from tests.test_api import ApiCase
 from ure.ai import AIError, AIRouter, url_is_allowed
 from ure.compliance import detect_license_text, scan_licenses, size_summary
@@ -154,6 +154,7 @@ class ComplianceTests(unittest.TestCase):
         found = {r["file"]: r["detected"] for r in scan_licenses(self.tmp)}
         self.assertEqual(found, {"LICENSE": ["MIT"], "vendor/COPYING.txt": ["não identificada"]})
 
+    @unittest.skipUnless(can_create_symlinks(), SYMLINK_SKIP_REASON)
     def test_size_summary_skips_symlinks(self) -> None:
         (self.tmp / "a.bin").write_bytes(b"x" * 100)
         (self.tmp / "ln").symlink_to(self.tmp / "a.bin")

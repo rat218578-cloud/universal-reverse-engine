@@ -7,7 +7,7 @@ import unittest
 import warnings
 from pathlib import Path
 
-from tests.helpers import find_real_pe, make_zip, synthetic_apk, synthetic_pe32
+from tests.helpers import SYMLINK_SKIP_REASON, can_create_symlinks, find_real_pe, make_zip, synthetic_apk, synthetic_pe32
 from ure.identify import KIND_APK, KIND_CORRUPT, KIND_ELF, KIND_EMPTY, KIND_JAR, KIND_PE, KIND_UNKNOWN, identify
 from ure.pe import PEError, parse_pe
 from ure.safezip import ArchiveLimitError, UnsafeArchiveError, clean_entry_name, safe_extract_zip
@@ -164,6 +164,7 @@ class StorageTests(TmpCase):
             with self.subTest(path=bad), self.assertRaises(PathRejectedError):
                 safe_join(base, bad)
 
+    @unittest.skipUnless(can_create_symlinks(), SYMLINK_SKIP_REASON)
     def test_safe_join_blocks_symlink_component(self) -> None:
         base = self.tmp / "base"
         base.mkdir()

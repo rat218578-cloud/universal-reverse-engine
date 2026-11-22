@@ -88,3 +88,33 @@ def run_server_in_thread(server: object) -> threading.Thread:
     t = threading.Thread(target=server.serve_forever, daemon=True)  # type: ignore[attr-defined]
     t.start()
     return t
+
+
+def can_create_symlinks() -> bool:
+    """Symlinks exigem privilégio no Windows (ou Modo Desenvolvedor). Testa de verdade."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        target = Path(td) / "alvo"
+        target.write_text("x", encoding="utf-8")
+        try:
+            (Path(td) / "ln").symlink_to(target)
+        except (OSError, NotImplementedError):
+            return False
+        return True
+
+
+SYMLINK_SKIP_REASON = "criar symlink exige privilégio neste sistema; o caso é coberto no Linux"
+
+
+def make_stub(path: Path, posix_lines: list[str], windows_lines: list[str]) -> Path:
+    """Cria um executável de teste. POSIX: script de shell. Windows: arquivo .cmd.
+    Os caminhos devolvidos incluem a extensão correta para cada plataforma."""
+    if os.name == "nt":
+        target = path.with_suffix(".cmd")
+        target.write_text("@echo off\r\n" + "\r\n".join(windows_lines) + "\r\n", encoding="utf-8")
+    else:
+        target = path
+        target.write_text("#!/bin/sh\n" + "\n".join(posix_lines) + "\n", encoding="utf-8")
+        target.chmod(0o755)
+    return target
