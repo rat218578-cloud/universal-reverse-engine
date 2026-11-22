@@ -2,7 +2,6 @@
 árvore e visualização de arquivos extraídos. Os arquivos são sintéticos, exceto onde indicado."""
 from __future__ import annotations
 
-import io
 import os
 import shutil
 import stat
@@ -14,7 +13,7 @@ from pathlib import Path
 
 from tests.helpers import find_real_pe, make_zip, synthetic_apk
 from tests.test_api import ApiCase
-from ure.safezip import ArchiveLimitError, _write_entry, safe_extract_zip
+from ure.safezip import safe_extract_zip
 
 LIMITS = {"max_entries": 1000, "max_total_bytes": 256 * 1024 * 1024, "max_ratio": 200.0}
 
@@ -50,59 +49,6 @@ class UnixTypeTests(unittest.TestCase):
         self.assertEqual(report.files, 0)
         self.assertTrue(any("link simbólico" in s for s in report.skipped))
         self.assertFalse(os.path.lexists(self.tmp / "out" / "ln"))
-
-
-class _FakeZip:
-    """Substituto mínimo de ZipFile: entrega um fluxo de dados já descompactados.
-    Usado só para exercitar a checagem de razão de compressão medida."""
-
-    def __init__(self, payload: bytes) -> None:
-        self._payload = payload
-
-    def open(self, info):  # noqa: A003
-        return io.BytesIO(self._payload)
-
-
-def _info(name: str, file_size: int, compress_size: int) -> zipfile.ZipInfo:
-    info = zipfile.ZipInfo(name)
-    info.file_size = file_size
-    info.compress_size = compress_size
-    return info
-
-
-class ZipBombTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp())
-        self.payload = os.urandom(2 * 1024 * 1024)  # 2 MiB reais, incompressíveis (para o teste)
-
-    def tearDown(self) -> None:
-        shutil.rmtree(self.tmp, ignore_errors=True)
-
-    def test_declared_ratio_over_limit_is_refused(self) -> None:
-        # tamanho declarado 8 MiB para 1 KiB comprimido: razão 8192:1
-        info = _info("a.bin", 8 * 1024 * 1024, 1024)
-        with self.assertRaises(ArchiveLimitError) as ctx:
-            _write_entry(_FakeZip(self.payload), info, self.tmp / "a.bin", 200.0, 10**9)
-        self.assertIn("declarada", str(ctx.exception))
-        self.assertFalse((self.tmp / "a.bin").exists() and (self.tmp / "a.bin").stat().st_size > 0)
-
-    def test_measured_ratio_over_limit_is_refused_even_if_declared_is_small(self) -> None:
-        # declarado 1.5 MiB para 8000 bytes comprimidos (razão 192, dentro do limite),
-        # mas o fluxo real entrega 2 MiB: a razão medida (~262:1) deve bloquear.
-        info = _info("b.bin", int(1.5 * 1024 * 1024), 8000)
-        with self.assertRaises(ArchiveLimitError) as ctx:
-            _write_entry(_FakeZip(self.payload), info, self.tmp / "b.bin", 200.0, 10**9)
-        self.assertIn("medida", str(ctx.exception))
-
-    def test_total_budget_enforced_on_actual_bytes(self) -> None:
-        info = _info("c.bin", len(self.payload), len(self.payload))  # razão 1:1, não é bomba
-        with self.assertRaises(ArchiveLimitError):
-            _write_entry(_FakeZip(self.payload), info, self.tmp / "c.bin", 200.0, 1024 * 1024)
-
-    def test_legitimate_compressible_file_passes(self) -> None:
-        arc = make_zip(self.tmp / "ok.zip", [("texto.txt", b"linha de texto\n" * 20000, None)])
-        report = safe_extract_zip(arc, self.tmp / "out", **LIMITS)
-        self.assertEqual(report.files, 1)
 
 
 class HttpRouteRegressionTests(ApiCase):

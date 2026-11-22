@@ -11,7 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from tests.helpers import synthetic_apk
 from tests.test_api import ApiCase
-from ure.ai import build_context
+from ure.ai import build_messages
 
 AKIA = "AKIAIOSFODNN7EXAMPLE"
 
@@ -70,10 +70,11 @@ class AiContextTests(unittest.TestCase):
             "secrets": {"findings": [{"file": "x", "rule": "aws-access-key-id", "offset": 0,
                                       "preview": "AKIA...LE"}]},
         }
-        ctx = build_context(report)
-        self.assertIn("aws-access-key-id", ctx)
-        self.assertNotIn("AKIA...LE", ctx)
-        self.assertIn("[E4]", ctx)
+        system, user = build_messages("pergunta", report)
+        self.assertIn("aws-access-key-id", user)
+        self.assertNotIn("AKIA...LE", user)
+        self.assertNotIn("AKIA...LE", system)
+        self.assertIn("[E4]", user)
 
 
 class AiFlowTests(ApiCase):

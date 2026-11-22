@@ -10,6 +10,7 @@ def main() -> None:
     server = make_server(settings)
     host, port = server.server_address[:2]
     print(f"Universal Reverse Engine em http://{host}:{port}", flush=True)
+    print(f"Token de sessão: {settings.data_dir / 'session.token'} (ou variável URE_TOKEN)", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

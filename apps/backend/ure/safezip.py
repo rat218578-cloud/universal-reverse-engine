@@ -1,30 +1,43 @@
-"""Extração segura de ZIP/APK/JAR.
+"""Extração segura de ZIP/APK/JAR com MEDIÇÃO REAL de bytes.
 
-Regras: rejeita traversal, caminhos absolutos, byte nulo, barra invertida e nomes duplicados
-(sem diferença de caixa); ignora links simbólicos e entradas especiais; limita entradas,
-bytes totais e razão de compressão (declarada e medida durante a escrita); grava com O_EXCL
-e O_NOFOLLOW para nunca seguir um link já existente no destino.
+A razão de compressão não usa os tamanhos declarados no cabeçalho do ZIP, porque eles são
+controlados pelo arquivo. O URE lê os dados comprimidos diretamente do arquivo, descompacta com
+zlib e mede bytes reais: comprimidos lidos e descompactados produzidos. Limites aplicados:
+número de entradas, bytes totais medidos, razão por entrada (a partir de 1 MiB de saída),
+razão agregada do arquivo (a partir de 8 MiB de saída), profundidade de caminho, CRC e tempo/
+cancelamento via Guard. Entradas criptografadas e métodos diferentes de STORED/DEFLATE são recusados.
+Em qualquer falha o diretório de destino é removido.
 """
 from __future__ import annotations
 
 import os
 import re
+import shutil
 import stat
+import struct
 import zipfile
+import zlib
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
-CHUNK = 1024 * 1024
-BOMB_MIN_SIZE = 1024 * 1024
+from .limits import Guard
+
+CHUNK = 256 * 1024
+OUT_CHUNK = 256 * 1024
+ENTRY_MIN_OUTPUT = 1024 * 1024
+AGG_MIN_OUTPUT = 8 * 1024 * 1024
+MAX_DEPTH = 32
+MAX_ITERATIONS = 10_000_000
+MAX_NAME_LEN = 255
 _DRIVE = re.compile(r"^[A-Za-z]:")
 
 
 class UnsafeArchiveError(ValueError):
-    """Entrada insegura (traversal, link, nome inválido, duplicata)."""
+    """Entrada insegura: traversal, nome inválido, duplicata, criptografia, método não suportado, corrupção."""
 
 
 class ArchiveLimitError(ValueError):
-    """Limite de entradas, tamanho ou razão de compressão excedido (possível ZIP bomb)."""
+    """Limite de entradas, bytes, razão de compressão, profundidade ou tempo excedido."""
 
 
 @dataclass
@@ -32,15 +45,28 @@ class ExtractionReport:
     files: int = 0
     directories: int = 0
     total_bytes: int = 0
+    compressed_bytes: int = 0
     skipped: list[str] = field(default_factory=list)
+
+
+@dataclass
+class _Totals:
+    out: int = 0
+    comp: int = 0
 
 
 def clean_entry_name(name: str) -> PurePosixPath:
     if not name or "\x00" in name or "\\" in name or name.startswith("/") or _DRIVE.match(name):
         raise UnsafeArchiveError(f"nome inseguro: {name!r}")
+    if len(name) > 1024:
+        raise UnsafeArchiveError("nome excessivamente longo")
     parts = [p for p in PurePosixPath(name).parts if p != "."]
     if not parts or any(p == ".." for p in parts):
         raise UnsafeArchiveError(f"traversal ou nome vazio: {name!r}")
+    if len(parts) > MAX_DEPTH:
+        raise ArchiveLimitError(f"profundidade {len(parts)} excede o limite de {MAX_DEPTH}")
+    if any(len(p) > MAX_NAME_LEN for p in parts):
+        raise UnsafeArchiveError("componente de nome longo demais")
     return PurePosixPath(*parts)
 
 
@@ -51,66 +77,145 @@ def safe_extract_zip(
     max_entries: int,
     max_total_bytes: int,
     max_ratio: float,
+    guard: Guard | None = None,
 ) -> ExtractionReport:
+    """Extrai em `dest` (que deve não existir ou estar vazio). Em falha, remove `dest` inteiro."""
     report = ExtractionReport()
-    dest.mkdir(parents=True, exist_ok=True)
-    base = dest.resolve()
-    with zipfile.ZipFile(archive) as zf:
-        infos = zf.infolist()
-        if len(infos) > max_entries:
-            raise ArchiveLimitError(f"{len(infos)} entradas excedem o limite de {max_entries}")
-        if sum(i.file_size for i in infos) > max_total_bytes:
-            raise ArchiveLimitError("tamanho total declarado excede o limite")
-        seen: set[str] = set()
-        for info in infos:
-            name = clean_entry_name(info.filename)
-            key = name.as_posix().casefold()
-            if key in seen:
-                raise UnsafeArchiveError(f"entrada duplicada: {info.filename!r}")
-            seen.add(key)
-            mode = (info.external_attr >> 16) & 0xFFFF
-            if stat.S_ISLNK(mode):
-                report.skipped.append(f"link simbólico ignorado: {info.filename}")
-                continue
-            target = base.joinpath(*name.parts)
-            if info.is_dir():
-                target.mkdir(parents=True, exist_ok=True)
-                report.directories += 1
-                continue
-            # Tipo Unix nos bits altos de external_attr. 0 = sem tipo informado (arquivo comum).
-            file_type = stat.S_IFMT(mode)
-            if file_type not in (0, stat.S_IFREG):
-                report.skipped.append(f"entrada especial ignorada: {info.filename}")
-                continue
-            target.parent.mkdir(parents=True, exist_ok=True)
-            if target.resolve().parent != base and base not in target.resolve().parents:
-                raise UnsafeArchiveError("destino escapa da área de extração")
-            report.total_bytes += _write_entry(zf, info, target, max_ratio, max_total_bytes - report.total_bytes)
-            report.files += 1
+    try:
+        dest.mkdir(parents=True, exist_ok=True)
+        base = dest.resolve()
+        totals = _Totals()
+        with zipfile.ZipFile(archive) as zf:
+            infos = zf.infolist()
+            if len(infos) > max_entries:
+                raise ArchiveLimitError(f"{len(infos)} entradas excedem o limite de {max_entries}")
+            seen: set[str] = set()
+            for info in infos:
+                if guard is not None:
+                    guard.check()
+                name = clean_entry_name(info.filename)
+                key = name.as_posix().casefold()
+                if key in seen:
+                    raise UnsafeArchiveError(f"entrada duplicada: {info.filename!r}")
+                seen.add(key)
+                mode = (info.external_attr >> 16) & 0xFFFF
+                if stat.S_ISLNK(mode):
+                    report.skipped.append(f"link simbólico ignorado: {info.filename}")
+                    continue
+                target = base.joinpath(*name.parts)
+                if info.is_dir():
+                    target.mkdir(parents=True, exist_ok=True)
+                    report.directories += 1
+                    continue
+                file_type = stat.S_IFMT(mode)
+                if file_type not in (0, stat.S_IFREG):
+                    report.skipped.append(f"entrada especial ignorada: {info.filename}")
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if base not in target.parent.resolve().parents and target.parent.resolve() != base:
+                    raise UnsafeArchiveError("destino escapa da área de extração")
+                if info.flag_bits & 0x1:
+                    raise UnsafeArchiveError(f"entrada criptografada não suportada: {info.filename!r}")
+                _extract_entry(archive, info, target, max_ratio, max_total_bytes, totals, guard)
+                report.files += 1
+        report.total_bytes = totals.out
+        report.compressed_bytes = totals.comp
+    except BaseException:
+        shutil.rmtree(dest, ignore_errors=True)
+        raise
     return report
 
 
-def _write_entry(zf: zipfile.ZipFile, info: zipfile.ZipInfo, target: Path, max_ratio: float, budget: int) -> int:
+def _check_ratio(entry_out: int, entry_comp: int, totals: _Totals, max_ratio: float, max_total: int) -> None:
+    if totals.out > max_total:
+        raise ArchiveLimitError("bytes extraídos excedem o limite total")
+    if entry_out > ENTRY_MIN_OUTPUT and entry_out > max_ratio * max(entry_comp, 1):
+        raise ArchiveLimitError(f"razão de compressão da entrada excede {max_ratio:.0f}:1 (medida)")
+    if totals.out > AGG_MIN_OUTPUT and totals.out > max_ratio * max(totals.comp, 1):
+        raise ArchiveLimitError(f"razão de compressão agregada excede {max_ratio:.0f}:1 (medida)")
+
+
+def _extract_entry(
+    archive: Path,
+    info: zipfile.ZipInfo,
+    target: Path,
+    max_ratio: float,
+    max_total: int,
+    totals: _Totals,
+    guard: Guard | None,
+) -> None:
+    if info.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+        raise UnsafeArchiveError(f"método de compressão {info.compress_type} não suportado")
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-    declared_ratio = info.file_size / max(info.compress_size, 1)
-    if info.file_size > BOMB_MIN_SIZE and declared_ratio > max_ratio:
-        raise ArchiveLimitError(f"razão de compressão declarada {declared_ratio:.0f}:1 excede {max_ratio:.0f}:1")
-    written = 0
-    fd = os.open(target, flags, 0o644)
-    try:
-        with zf.open(info) as src, os.fdopen(fd, "wb") as out:
-            fd = -1
-            while True:
-                chunk = src.read(CHUNK)
-                if not chunk:
-                    break
-                written += len(chunk)
-                if written > budget:
-                    raise ArchiveLimitError("bytes extraídos excedem o limite total")
-                if written > BOMB_MIN_SIZE and written / max(info.compress_size, 1) > max_ratio:
-                    raise ArchiveLimitError("razão de compressão medida excede o limite (ZIP bomb)")
-                out.write(chunk)
-    finally:
-        if fd != -1:
-            os.close(fd)
-    return written
+    crc = 0
+    entry_out = 0
+    entry_comp = 0
+    with archive.open("rb") as f:
+        f.seek(info.header_offset)
+        hdr = f.read(30)
+        if len(hdr) < 30 or hdr[:4] != b"PK\x03\x04":
+            raise UnsafeArchiveError("cabeçalho local inválido")
+        name_len, extra_len = struct.unpack("<HH", hdr[26:30])
+        f.seek(info.header_offset + 30 + name_len + extra_len)
+        fd = os.open(target, flags, 0o644)
+        with os.fdopen(fd, "wb") as out:
+
+            def emit(data: bytes) -> None:
+                nonlocal crc, entry_out
+                if not data:
+                    return
+                crc = zlib.crc32(data, crc)
+                entry_out += len(data)
+                totals.out += len(data)
+                _check_ratio(entry_out, entry_comp, totals, max_ratio, max_total)
+                out.write(data)
+
+            if info.compress_type == zipfile.ZIP_STORED:
+                remaining = info.compress_size
+                while remaining > 0:
+                    if guard is not None:
+                        guard.check()
+                    chunk = f.read(min(CHUNK, remaining))
+                    if not chunk:
+                        raise UnsafeArchiveError("dados armazenados truncados")
+                    remaining -= len(chunk)
+                    entry_comp += len(chunk)
+                    totals.comp += len(chunk)
+                    emit(chunk)
+            else:
+                dec = zlib.decompressobj(-zlib.MAX_WBITS)
+                iterations = 0
+                while True:
+                    iterations += 1
+                    if iterations > MAX_ITERATIONS:
+                        raise UnsafeArchiveError("fluxo comprimido não converge")
+                    if guard is not None:
+                        guard.check()
+                    # fim do fluxo tem precedência: bytes sobrando após o fim são ignorados
+                    if dec.eof:
+                        break
+                    if dec.unconsumed_tail:
+                        pending = dec.unconsumed_tail
+                    else:
+                        pending = f.read(CHUNK)
+                        if not pending:
+                            raise UnsafeArchiveError("fluxo comprimido truncado")
+                    try:
+                        data = dec.decompress(pending, OUT_CHUNK)
+                    except zlib.error as exc:
+                        raise UnsafeArchiveError(f"fluxo comprimido corrompido: {exc}") from None
+                    # conta só os bytes que o zlib consumiu desta entrada (não o bloco lido à frente)
+                    unused = len(dec.unused_data) if dec.eof else 0
+                    consumed = len(pending) - len(dec.unconsumed_tail) - unused
+                    entry_comp += consumed
+                    totals.comp += consumed
+                    emit(data)
+                if not dec.eof:
+                    raise UnsafeArchiveError("fluxo comprimido incompleto")
+                try:
+                    tail = dec.flush()
+                except zlib.error as exc:
+                    raise UnsafeArchiveError(f"fluxo comprimido corrompido: {exc}") from None
+                emit(tail)
+    if (crc & 0xFFFFFFFF) != info.CRC:
+        raise UnsafeArchiveError(f"CRC inválido em {info.filename!r}")

@@ -10,6 +10,8 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -102,45 +104,57 @@ def run_tool(
     argv: list[str],
     *,
     cwd: Path,
-    timeout_s: int,
+    timeout_s: float,
     memory_mb: int,
     log: Path,
     stdout_file: Path | None = None,
+    cancel: threading.Event | None = None,
 ) -> dict[str, Any]:
-    """Executa um motor com tempo limite e limite de memória virtual (POSIX, via RLIMIT_AS)."""
+    """Executa um motor com tempo limite, cancelamento e limite de memória virtual (POSIX).
+
+    Saídas vão para arquivos (nunca para pipes sem leitura, que travariam em saídas grandes).
+    Em tempo esgotado ou cancelamento, o processo é encerrado.
+    """
     cmd = list(argv)
     limited = os.name == "posix"
     if limited:
         cmd = [sys.executable, "-c", _LIMIT_STUB, str(memory_mb * MB), *argv]
     env = {k: os.environ[k] for k in ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "JAVA_HOME") if k in os.environ}
+    log.parent.mkdir(parents=True, exist_ok=True)
+    err_fh = log.open("wb")
     out_fh = stdout_file.open("wb") if stdout_file else None
     try:
-        proc = subprocess.run(
-            cmd,
-            cwd=cwd,
-            env=env,
-            stdin=subprocess.DEVNULL,
-            stdout=out_fh if out_fh else subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=timeout_s,
-            check=False,
-        )
-    except subprocess.TimeoutExpired:
-        return {"status": "timeout", "timeout_s": timeout_s, "memory_limit_applied": limited}
-    except FileNotFoundError:
-        return {"status": "missing", "memory_limit_applied": limited}
+        kwargs: dict[str, Any] = {"stdin": subprocess.DEVNULL}
+        if out_fh is not None:
+            kwargs.update(stdout=out_fh, stderr=err_fh)
+        else:
+            kwargs.update(stdout=err_fh, stderr=subprocess.STDOUT)
+        try:
+            proc = subprocess.Popen(cmd, cwd=cwd, env=env, **kwargs)
+        except FileNotFoundError:
+            return {"status": "missing", "memory_limit_applied": limited}
+        deadline = time.monotonic() + timeout_s
+        status: str | None = None
+        while status is None:
+            try:
+                rc = proc.wait(timeout=0.2)
+                status = "ok" if rc == 0 else "failed"
+            except subprocess.TimeoutExpired:
+                if cancel is not None and cancel.is_set():
+                    proc.kill()
+                    proc.wait()
+                    status = "cancelled"
+                elif time.monotonic() > deadline:
+                    proc.kill()
+                    proc.wait()
+                    status = "timeout"
     finally:
-        if out_fh:
+        if out_fh is not None:
             out_fh.close()
-    captured = proc.stderr or b""
-    if not out_fh:
-        captured = (proc.stdout or b"") + captured
-    log.parent.mkdir(parents=True, exist_ok=True)
-    log.write_bytes(captured[-65536:])
-    status = "ok" if proc.returncode == 0 else "failed"
-    return {
-        "status": status,
-        "returncode": proc.returncode,
-        "log": log.name,
-        "memory_limit_applied": limited,
-    }
+        err_fh.close()
+    result: dict[str, Any] = {"status": status, "log": log.name, "memory_limit_applied": limited}
+    if status in ("ok", "failed"):
+        result["returncode"] = proc.returncode
+    if status == "timeout":
+        result["timeout_s"] = timeout_s
+    return result

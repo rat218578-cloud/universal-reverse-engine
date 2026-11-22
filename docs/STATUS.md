@@ -1,90 +1,68 @@
 # Status do Universal Reverse Engine
 
-Verificação local mais recente: **86 testes Python** (unittest) e **4 testes Node** (node --test), todos passando.
-Teste HTTP completo executado contra o servidor real, com o PE real `w32.exe` e um APK sintético.
+Branch de trabalho: `security/correcao-auditoria` (criada a partir de `develop`). `main` intacta em `1905f54`.
 
-## 1. Implementado e testado
-- Upload de APK e EXE/DLL: limite de tamanho (413), formato validado pelo conteúdo (415), SHA-256 em streaming, original somente leitura.
+Verificação mais recente: **130 testes Python** (unittest), **4 testes Node** e **22 verificações HTTP** ponta a ponta
+(`apps/backend/scripts/e2e_security.py`). Todos passam. Este número não equivale a segurança completa: ver
+`docs/AUDIT.md`, seção "Vulnerabilidades que continuam abertas".
+
+## Segurança após a correção da auditoria
+
+Corrigido e testado: validação de Host e Origin (DNS rebinding); token de sessão obrigatório em /api; timeout de socket;
+erros genéricos; medição real de bytes em ZIP, com razão por entrada e agregada, limite de profundidade e limpeza após
+falha; lock por artefato; exclusão recusada com trabalho ativo; orçamento de IA atômico; cancelamento cooperativo; limite
+de tempo nas etapas em processo; delimitação de dados não confiáveis no prompt; validação das citações [E1]–[E4].
+
+Parcial: limite de CPU não aplicado em trabalho em processo; efeito da separação de instruções sobre o modelo não garantido.
+
+Aberto: motores externos sem execução real; sem cota global de disco; sem limite de conexões; logs de motores sem varredura
+de segredos; Windows não testado; interface não testada em navegador. Detalhes em `docs/AUDIT.md`.
+
+## Implementado e testado
+- Upload de APK e EXE/DLL com limite de tamanho (413), formato validado pelo conteúdo (415), SHA-256 em streaming, original somente leitura.
 - Identificação por assinatura: APK, JAR, ZIP, PE, ELF, Mach-O, DEX, corrompidos.
-- Tipos Unix de ZIP (`S_IFMT`): regular aceito; FIFO, dispositivo e link ignorados.
-- Extração segura: traversal, caminhos absolutos, byte nulo, duplicatas, links, limites de entradas e bytes.
-- ZIP bomb: checagem da razão **declarada** e da razão **medida** durante a escrita (testadas com fluxo injetado).
-- Árvore, prévia (texto e hex), bloqueio de traversal e de links em todas as rotas de arquivo.
-- Exportação ZIP com MANIFEST.json; original só com `include_original=1`.
-- Rotas HTTP: página inicial em GET e HEAD (200); 405 em JSON para métodos errados, inclusive em rotas conhecidas e OPTIONS; 404 para rotas inexistentes; 400 para IDs inválidos.
-- Analisador PE próprio (biblioteca padrão), validado com `w32.exe` real: 84 importações de KERNEL32, 6 de USER32, 3 de SHLWAPI.
-- Jobs persistidos com progresso (SSE), nova tentativa só para falhos/interrompidos, recuperação após reinício.
-- Varredura de segredos com valores mascarados (nenhum valor completo em relatório, interface ou contexto de IA).
-- Autenticação por token opcional; bind fora de loopback exige token.
-- Exclusão de projeto exige digitar o nome.
-- Verificação de licenças por texto e resumo de tamanho (indicativo, não é parecer jurídico).
-- Exportação para repositório Git **local** com um commit por fonte; sem remoto, nenhum push.
-- Interface web sem build: painel, projetos, envio, progresso, relatório, árvore, prévia, extração, exportação. Módulos puros testados com node.
-- Medição real: servidor com análise de PE em **26,6 MB** de pico de RSS.
+- Extração segura com medição real de bytes, traversal, links, duplicatas, tipos Unix, criptografia, métodos não suportados, CRC.
+- Árvore, prévia (texto e hex) e exportação ZIP com MANIFEST.json.
+- Analisador PE próprio validado com `w32.exe` real (PE32): 84 importações de KERNEL32, 6 de USER32, 3 de SHLWAPI.
+- Jobs com progresso (SSE), cancelamento, limite de tempo, nova tentativa para falhos/cancelados/interrompidos, recuperação após reinício.
+- Varredura de segredos com valores mascarados.
+- Exportação para repositório Git local, sem remoto.
+- Verificação de licenças e tamanho (indicativa).
+- Medição: servidor com análise de PE real, 26,6 MB de pico de RSS (medição anterior à correção; não refeita).
 
-## 2. Implementado, mas não testado com ferramenta real
-- **apktool**: adaptador e parsing de saída. Ferramenta ausente; registrada como `missing`.
-- **JADX**: adaptador e contagem de `.java`. Ausente.
-- **apkanalyzer**: adaptador, saída em `reports/`. Ausente.
-- **ILSpy (ilspycmd)**: adaptador para assemblies .NET, acionado quando o PE tem runtime CLR. Ausente.
-- **Ghidra analyzeHeadless**: adaptador em análise profunda (`deep=true`); saída só em log. Ausente.
-- **LIEF**: apenas detecção. O analisador PE próprio é o que está em uso.
-- **Adaptador de IA externa (OpenAI-compatível)**: testado contra servidor falso em loopback, não contra um provedor real.
-- **Ollama**: testado contra servidor falso que imita `/api/tags` e `/api/generate`. Sem modelo real.
-- **Dockerfile**: escrito, **não construído**. Docker ausente.
-- **Esqueleto Tauri (apps/desktop)**: escrito, **não compilado**. Rust ausente.
-- **CI (.github/workflows/ci.yml)**: escrito, **não executado**. Não há remoto.
+## Implementado, não validado com ferramenta real
+- apktool, JADX, apkanalyzer, ILSpy, Ghidra: adaptadores com status `missing`. Nenhum foi executado com sucesso.
+- LIEF: apenas detecção; não é usado.
+- Ollama: testado contra servidor falso em loopback.
+- Provedor OpenAI-compatível: testado contra servidor falso em loopback.
+- Dockerfile: não construído (Docker ausente).
+- Esqueleto Tauri em `apps/desktop`: não compilado (Rust ausente).
+- CI em `.github/workflows/ci.yml`: não executado (sem remoto).
 
-## 3. Parcial
-- **Dependências**: DEX, bibliotecas nativas, ABIs, assinaturas e JARs embutidos para APK; DLLs importadas para PE. Permissões do manifesto não são extraídas, porque o AXML binário não é decodificado pelo URE.
-- **Análise de código e arquitetura**: só indicadores estáticos e contagens. Não há grafo de chamadas nem análise de arquitetura.
-- **Ghidra**: executa importação e auto-análise, sem exportar resultados estruturados.
-- **Interface**: sem teste em navegador real; só sintaxe, módulos puros e entrega dos arquivos.
-- **Limite de memória**: RLIMIT_AS só em POSIX. Sem limite de CPU separado; o tempo limite cobre o caso.
-- **Repositório Git**: local apenas. Não há criação de repositório no GitHub nem commits automatizados em remoto.
+## Parcial
+- Dependências Android: DEX, bibliotecas nativas, ABIs, assinaturas e JARs embutidos. Sem permissões: o AXML binário não é decodificado.
+- PE: PE32+ não testado com amostra real; assinatura apenas por existência de diretório de certificado.
+- ELF e Mach-O: só identificação.
+- Ghidra: importação e auto-análise, sem saída estruturada.
 
-## 4. Não implementado
-- Chat com memória entre perguntas. Cada pergunta é independente, com evidências E1–E4.
-- Criação de repositórios privados no GitHub, push e publicação.
-- Gerenciamento de usuários e sessões. Só há um token.
-- Suporte a Mach-O e ELF na análise (são identificados, não analisados).
-- Desktop empacotado para Windows.
-- Auto-atualização, assinatura de binários e instaladores.
+## Não implementado
+- Chat com memória entre perguntas.
+- Repositório no GitHub, push, publicação e commits automatizados em remoto.
+- Usuários e sessões (só token único).
+- Análise de Mach-O e ELF.
+- Desktop empacotado e assinado.
 
-## 5. Bloqueado por falta de rede ou ferramentas
-- Instalação de apktool, JADX, apkanalyzer, ILSpy, Ghidra, LIEF, Ollama e modelos locais.
-- Docker (build e execução do Dockerfile).
-- Rust e Tauri (build do desktop).
-- GitHub CLI e acesso ao GitHub (repositório privado e CI remoto).
-- Navegador headless para testes de interface.
-- APK e DEX reais: nenhum existe neste ambiente. Os testes de APK usam estruturas sintéticas.
-
-## Testes sintéticos vs. reais
-| Teste | Tipo de arquivo |
-|---|---|
-| PE `w32.exe` (análise, upload, export, HTTP) | **real** (launcher do pip, presente no sistema) |
-| ELF `/usr/bin/ls` (identificação) | **real** |
-| PE mínimo com importação de `KERNEL32!ExitProcess` | sintético, montado byte a byte |
-| APK, JAR, ZIPs com traversal, symlink, duplicata, bomba | sintéticos |
-| Fluxo HTTP de APK (upload, extração, árvore, prévia, export, git) | sintético |
-| Servidor Ollama e provedor OpenAI-compatível | **test doubles** em loopback |
-
-Os `skipTest` existentes só disparam quando o recurso real não existe. Neste ambiente, o PE real está presente e
-nenhum teste de PE é pulado.
+## Bloqueado por falta de rede ou ferramentas
+- Instalação de apktool, JADX, apkanalyzer, ILSpy, Ghidra, LIEF, Ollama e modelos.
+- Docker, Rust/Tauri, GitHub CLI, navegador headless, APK e DEX reais.
 
 ## Como executar
 ```
 cd apps/backend
-python3 -m ure.server                                  # http://127.0.0.1:8765
+python3 -m ure.server            # http://127.0.0.1:8765; token em data/session.token
 python3 -m unittest discover -s tests -t . -v
+python3 scripts/e2e_security.py  # ponta a ponta com servidor real
 cd ../web && npm test
 ```
-Variáveis úteis: `URE_TOKEN`, `URE_AI_ENABLED=1`, `URE_OLLAMA_MODEL`, `URE_EXTERNAL_AI_URL` + `URE_EXTERNAL_AI_KEY`
-(só com `consent=true` por requisição), `URE_APKTOOL`, `URE_JADX`, `URE_APKANALYZER`, `URE_ILSPYCMD`, `URE_GHIDRA`.
-
-## Próximos passos
-1. Instalar apktool, JADX e apkanalyzer e validar a análise de um APK real.
-2. Validar Ollama com um modelo local real e medir latência e memória.
-3. Testar a interface em navegador real.
-4. Construir o Dockerfile e o desktop em máquina com as ferramentas.
-5. Criar remoto privado e executar o CI, somente após confirmação.
+O token deve ser enviado no cabeçalho `Authorization: Bearer <token>` nas rotas /api (exceto /api/v1/health).
+A interface pede o token no campo do topo.

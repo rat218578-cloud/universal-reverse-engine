@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -25,6 +26,9 @@ class Settings:
     ollama_url: str = "http://127.0.0.1:11434"
     ai_daily_budget: int = 50
     job_workers: int = 1
+    socket_timeout_s: int = 30
+    extra_hosts: tuple[str, ...] = ()
+    job_timeout_s: int = 900
     ollama_model: str = "llama3.2"
     external_ai_url: str | None = None
     external_ai_model: str = "default"
@@ -51,6 +55,9 @@ class Settings:
             ollama_url=env.get("URE_OLLAMA_URL", "http://127.0.0.1:11434"),
             ai_daily_budget=num("URE_AI_DAILY_BUDGET", 50),
             job_workers=num("URE_JOB_WORKERS", 1),
+            socket_timeout_s=num("URE_SOCKET_TIMEOUT_S", 30),
+            extra_hosts=tuple(h.strip() for h in env.get("URE_ALLOWED_HOSTS", "").split(",") if h.strip()),
+            job_timeout_s=num("URE_JOB_TIMEOUT_S", 900),
             ollama_model=env.get("URE_OLLAMA_MODEL", "llama3.2"),
             external_ai_url=env.get("URE_EXTERNAL_AI_URL") or None,
             external_ai_model=env.get("URE_EXTERNAL_AI_MODEL", "default"),
@@ -61,3 +68,16 @@ class Settings:
         """Recusa expor a API fora do loopback sem token de acesso."""
         if self.host not in LOOPBACK and not self.token:
             raise RuntimeError("Bind fora de loopback exige URE_TOKEN definido.")
+
+
+def load_or_create_token(data_dir: Path) -> str:
+    """Token de sessão aleatório (32 bytes), gravado com permissão 0600. Reutilizado entre execuções."""
+    path = data_dir / "session.token"
+    if path.is_file():
+        return path.read_text(encoding="utf-8").strip()
+    data_dir.mkdir(parents=True, exist_ok=True)
+    token = secrets.token_urlsafe(32)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(token)
+    return token

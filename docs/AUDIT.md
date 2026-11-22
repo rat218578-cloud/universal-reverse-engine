@@ -658,3 +658,59 @@ Essas correções não foram feitas, porque esta etapa é somente de auditoria.
 - Experimentos H1 e H2: executados em diretório temporário que foi apagado. Nenhum arquivo do repositório foi alterado.
 - Nenhuma ferramenta foi instalada. Nenhuma rede foi usada. Nada foi publicado.
 - Este arquivo (`docs/AUDIT.md`) é a única alteração. Ele não foi commitado, para que você decida se deve entrar na `develop`.
+
+
+---
+
+## Atualização pós-correção (branch `security/correcao-auditoria`)
+
+Esta seção registra o estado após a correção. O diagnóstico acima é mantido como registro histórico.
+
+### Vulnerabilidades corrigidas
+
+| Item | Situação | Evidência de teste |
+|---|---|---|
+| B3/H1: cabeçalho forjado contorna razão | **Corrigido** na lógica. Razão medida pelos bytes consumidos pelo zlib, sem usar `compress_size` do cabeçalho | `test_security.ZipBombTests` (ZIPs reais forjados); E2E com bomba forjada pela rede (HTTP 413) |
+| B3/H2: razão agregada não limitada | **Corrigido**: razão agregada a partir de 8 MiB de saída | `test_aggregate_ratio_across_many_small_entries_is_refused` |
+| B11/H9: DNS rebinding e Host não validado | **Corrigido**: Host restrito a loopback e à porta real; Origin restrita | `HostAndOriginTests`; E2E (DNS rebinding em health, projetos e estáticos) |
+| B11: token opcional (sem autenticação por padrão) | **Corrigido**: token de sessão aleatório (32 bytes), gravado 0600, obrigatório em /api | `AuthTokenTests`; E2E (sem token, token errado, token na query) |
+| B11/H10: sem timeout de socket | **Corrigido**: `socket_timeout_s` (30 s) em cada conexão | `SocketTimeoutTests`; E2E (cliente lento desconectado em ~2 s) |
+| H8/erros: detalhes internos em erros | **Corrigido**: 500 genérico; falhas de job com mensagem genérica (exceções não previstas) | `ErrorExposureTests` |
+| B7: extração apaga diretório usado por análise | **Corrigido**: lock por artefato; extração/exportação/git/análise são exclusivos | `ConcurrencyTests` |
+| B7: exclusão de projeto com trabalho ativo | **Corrigido**: recusada com jobs ativos ou artefato travado | `test_delete_refused_with_active_job_and_with_locked_artifact` |
+| B7: merge de `details` sobrescrevia chaves | **Corrigido**: leitura-merge-escrita em seção crítica | `test_details_merge_is_atomic_under_concurrency` |
+| E5: orçamento de IA não atômico | **Corrigido**: reserva atômica no SQL | `test_atomic_budget_under_real_thread_contention` (60 threads, exatamente 10 concedidos) |
+| B5: sem cancelamento | **Corrigido**: cancelamento cooperativo, encerramento do subprocesso do motor, job na fila nunca executa | `test_cancel_running_job_stops_quickly`, `test_cancel_queued_job_never_runs_it`, `test_external_tool_is_killed_on_cancel` |
+| B9: limites de tempo só em motores | **Corrigido** para etapas em processo: Guard em extração, varredura e passos da análise | `TimeLimitTests` |
+| E8: prompt injection | **Corrigido na estrutura**: instruções só no papel de sistema; dados em blocos com marcador aleatório por requisição; controles removidos; nomes com padrão de segredo omitidos | `PromptInjectionTests` |
+| E8: citações [E1]–[E4] não verificadas | **Corrigido**: citações inexistentes são listadas em `unverified_citations` | `test_citations_are_validated` |
+| BUG novo: laço infinito na descompressão (DoS) | **Corrigido**: fim do fluxo tem precedência; limite de iterações | `test_zip_termination` (e suíte completa, que antes travava) |
+| BUG novo: fluxo corrompido gerava erro interno | **Corrigido**: `zlib.error` vira rejeição do arquivo | `test_corrupted_deflate_stream_is_rejected_not_crashing` |
+
+### Vulnerabilidades parcialmente corrigidas
+
+- **ZIP bomb (B3/H1)**: a correção elimina a dependência do cabeçalho na razão medida. A exploração com arquivo real **não foi reproduzida** contra a versão antiga: a biblioteca `zipfile` barrou as variantes testadas (sobreposição de entradas e CRC). A demonstração contra a versão antiga existe apenas no nível da lógica (fluxo injetado). Os testes novos falham contra a versão antiga, mas por motivo diferente (`BadZipFile` em vez de `ArchiveLimitError`), o que deve ser lembrado ao interpretá-los.
+- **Limites de tempo (B9)**: aplicados a extração, varredura e passos da análise. **Limite de CPU não é aplicado** em trabalho em processo: o Python não oferece cota de CPU por thread sem recursos do SO.
+- **Prompt injection (E8)**: a estrutura impede que o conteúdo do arquivo entre no papel de sistema e torna a delimitação verificável. **Se o modelo obedece ou não às instruções de sistema não é garantido pelo URE**, e não foi validado com nenhum modelo real.
+- **Erros (H8)**: tracebacks continuam indo para o log do servidor (intencional, para diagnóstico). Mensagens de validação de ZIP ainda citam nomes de entradas do próprio arquivo analisado.
+
+### Vulnerabilidades que continuam abertas
+
+1. **Motores externos não validados**: apktool, JADX, apkanalyzer, ILSpy e Ghidra continuam sem execução real. A sandbox desses motores é só limite de memória e tempo (POSIX), sem isolamento de usuário ou contêiner.
+2. **Cota global de disco inexistente**: o limite é por artefato (2 GiB). Exportações em `exports/` não são removidas.
+3. **Concorrência de threads não limitada**: `ThreadingHTTPServer` cria uma thread por conexão. Conexões SSE mantêm uma thread por até 30 minutos. Não há limite de conexões nem de taxa.
+4. **Envio lento contínuo**: o timeout é por operação de leitura. Um cliente que envia um byte a cada 29 s mantém a conexão aberta durante um upload grande.
+5. **Logs de motores não varridos por segredos** (H8). Os logs ficam em `reports/logs/`.
+6. **Token em texto simples** em `session.token` (0600 no POSIX). No Windows a permissão não se aplica e não foi verificada.
+7. **Processo único**: o lock é em memória. Dois processos servidores sobre o mesmo diretório de dados não são suportados.
+8. **Nomes de arquivos e funções ainda aparecem nos relatórios** (não no prompt, que os sanitiza). Isso é o comportamento esperado de um relatório técnico.
+9. **Interface não testada em navegador**. As mudanças de token e cancelamento foram verificadas apenas por sintaxe e pelo backend.
+10. **Windows não validado**: nenhum teste foi executado nessa plataforma, e os limites de memória não se aplicam nela.
+
+### Testes executados após a correção
+
+- Suíte Python: 130 testes, todos passando.
+- Suíte Node: 4 testes, todos passando.
+- Teste HTTP ponta a ponta (`apps/backend/scripts/e2e_security.py`): 22 verificações, todas passando, sem tracebacks no log do servidor.
+- Reprodução contra a versão antiga (`ca53871`): DNS rebinding e acesso sem token **permitidos** (vulnerável); H2 **aceito** (105 MiB extraídos de 117 KiB); H1 não reproduzido com arquivo real (ver acima).
+- Contra a versão corrigida: H2 bloqueado, H1 (lógica e arquivo real) bloqueado, DNS rebinding bloqueado, token obrigatório.

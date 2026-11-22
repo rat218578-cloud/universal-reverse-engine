@@ -29,7 +29,7 @@ def _redact(raw: bytes) -> str:
     return f"{text[:4]}...{text[-2:]}"
 
 
-def scan_secrets(base: Path) -> dict[str, Any]:
+def scan_secrets(base: Path, guard: Any = None) -> dict[str, Any]:
     findings: list[dict[str, Any]] = []
     scanned = 0
     total = 0
@@ -40,6 +40,8 @@ def scan_secrets(base: Path) -> dict[str, Any]:
             path = Path(dirpath, name)
             if path.is_symlink() or not path.is_file():
                 continue
+            if guard is not None:
+                guard.check()
             size = path.stat().st_size
             if size > MAX_FILE_BYTES or total + size > MAX_TOTAL_BYTES:
                 truncated = True

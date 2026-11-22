@@ -16,7 +16,7 @@ from ure.config import Settings
 
 
 class ApiCase(unittest.TestCase):
-    token: str | None = None
+    token: str | None = "token-de-teste-longo-0123456789"
     max_upload: int = 8 * 1024 * 1024
     settings_extra: dict = {}
 
@@ -78,7 +78,8 @@ class ApiFlowTests(ApiCase):
         status, body = self.js("GET", "/api/v1/health")
         self.assertEqual(status, 200)
         self.assertEqual(body["status"], "ok")
-        self.assertFalse(body["ai_enabled"])
+        self.assertNotIn("ai_enabled", body)
+        self.assertFalse(self.js("GET", "/api/v1/ai/status")[1]["enabled"])
 
     def test_project_crud_and_invalid_ids(self) -> None:
         pid = self.new_project("Alpha")

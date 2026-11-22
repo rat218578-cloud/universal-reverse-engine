@@ -140,6 +140,26 @@ class Store:
             self._conn.commit()
             return cur.rowcount
 
+    def patch_artifact(self, aid: str, *, status: str | None = None,
+                       details_patch: dict[str, Any] | None = None) -> None:
+        """Leitura-merge-escrita em uma seção crítica: chaves de `details` não se sobrescrevem."""
+        with self._lock:
+            row = self._conn.execute("SELECT details FROM artifacts WHERE id=?", (aid,)).fetchone()
+            if row is None:
+                return
+            details = json.loads(row["details"])
+            if details_patch:
+                details.update(details_patch)
+            sets, params = ["details=?"], [json.dumps(details, ensure_ascii=False)]
+            if status is not None:
+                sets.append("status=?")
+                params.append(status)
+            self._conn.execute(f"UPDATE artifacts SET {','.join(sets)} WHERE id=?", (*params, aid))
+            self._conn.commit()
+
+    def active_jobs(self, pid: str) -> list[dict[str, Any]]:
+        return self._run("SELECT * FROM jobs WHERE project_id=? AND status IN ('queued','running')", (pid,))
+
     # cache e orçamento de IA
     def cache_get(self, key: str) -> dict[str, Any] | None:
         return self._one("SELECT * FROM ai_cache WHERE key=?", (key,))
@@ -153,6 +173,14 @@ class Store:
     def ai_calls_today(self, day: str) -> int:
         row = self._one("SELECT calls FROM ai_usage WHERE day=?", (day,))
         return int(row["calls"]) if row else 0
+
+    def reserve_ai_call(self, day: str, limit: int) -> bool:
+        """Reserva uma chamada de forma atômica: incrementa só se ainda estiver abaixo do limite."""
+        with self._lock:
+            self._conn.execute("INSERT OR IGNORE INTO ai_usage(day,calls) VALUES(?,0)", (day,))
+            cur = self._conn.execute("UPDATE ai_usage SET calls=calls+1 WHERE day=? AND calls<?", (day, limit))
+            self._conn.commit()
+            return cur.rowcount == 1
 
     def ai_increment(self, day: str) -> None:
         self._run(

@@ -22,6 +22,7 @@ KIND_UNKNOWN = "unknown"
 
 UPLOADABLE_KINDS = frozenset({KIND_APK, KIND_PE})
 MACHO_MAGICS = frozenset({b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf", b"\xce\xfa\xed\xfe", b"\xcf\xfa\xed\xfe"})
+MAX_IDENTIFY_ENTRIES = 200_000
 ZIP_MAGICS = frozenset({b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"})
 _DEX_TOP = re.compile(r"classes\d*\.dex$")
 ELF_TYPES = {1: "REL", 2: "EXEC", 3: "DYN", 4: "CORE"}
@@ -52,7 +53,10 @@ def identify(path: Path) -> dict[str, Any]:
 def _identify_zip(path: Path) -> dict[str, Any]:
     try:
         with zipfile.ZipFile(path) as zf:
-            names = {i.filename for i in zf.infolist()}
+            infos = zf.infolist()
+            if len(infos) > MAX_IDENTIFY_ENTRIES:
+                return {"kind": KIND_CORRUPT, "reason": "contêiner com número de entradas acima do limite"}
+            names = {i.filename for i in infos}
     except (zipfile.BadZipFile, OSError, ValueError, RuntimeError):
         return {"kind": KIND_CORRUPT, "reason": "contêiner ZIP corrompido ou ilegível"}
     has_dex = any(_DEX_TOP.fullmatch(n) for n in names)

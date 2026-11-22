@@ -35,9 +35,11 @@ const show = (...nodes) => view.replaceChildren(...nodes);
 
 // ----- saúde e token -----------------------------------------------------
 async function refreshHealth() {
+  // /api/v1/health é público; a verificação de token usa uma rota autenticada.
   const pill = document.querySelector("#health");
   try {
     const info = await api("GET", "/api/v1/health");
+    await api("GET", "/api/v1/projects");
     pill.textContent = `online · v${info.version}`;
     pill.className = "pill ok";
   } catch (e) {
@@ -230,9 +232,17 @@ async function download(pid, art, includeOriginal) {
 async function runJob(box, label, path, body, pid, aid) {
   const bar = h("span", { style: "width:0%" });
   const msg = h("p", { class: "muted" }, `${label}…`);
-  box.replaceChildren(h("h3", {}, "Processamento"), msg, h("div", { class: "bar" }, bar));
+  let jobId = null;
+  const cancel = h("button", { class: "danger", onclick: async () => {
+    if (!jobId) return;
+    cancel.disabled = true;
+    try { await api("POST", `/api/v1/jobs/${jobId}/cancel`); msg.textContent = "Cancelamento solicitado…"; }
+    catch (e) { fail(e); cancel.disabled = false; }
+  } }, "Cancelar");
+  box.replaceChildren(h("h3", {}, "Processamento"), msg, h("div", { class: "bar" }, bar), h("div", { class: "row" }, cancel));
   try {
     const job = await api("POST", path, { body });
+    jobId = job.id;
     const final = await followJob(job.id, (state) => {
       bar.style.width = `${Math.round((state.progress || 0) * 100)}%`;
       msg.textContent = state.message || label;
@@ -240,6 +250,8 @@ async function runJob(box, label, path, body, pid, aid) {
     if (final?.status === "done") {
       toast("Concluído.");
       route();
+    } else if (final?.status === "cancelled") {
+      msg.textContent = "Processamento cancelado.";
     } else {
       msg.textContent = `Falhou: ${final?.error || "erro desconhecido"}`;
       msg.className = "err";
