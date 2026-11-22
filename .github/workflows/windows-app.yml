@@ -1,0 +1,144 @@
+name: windows-app
+
+# Compila o aplicativo Tauri para Windows, gera os instaladores NSIS (.exe) e MSI (.msi),
+# verifica o conteúdo e testa a instalação real. Não publica nada: os instaladores ficam
+# como artifacts do workflow. Não há release, tag ou merge.
+
+on:
+  push:
+    branches:
+      - feature/windows-desktop
+    paths:
+      - "apps/**"
+      - ".github/workflows/windows-app.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-regression:
+    name: Regressão do backend no Windows
+    runs-on: windows-2022
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Testes unitários e de integração (APK, EXE, DLL, persistência, segurança)
+        working-directory: apps/backend
+        run: python -m unittest discover -s tests -t . -v
+
+      - name: E2E de segurança com servidor real
+        working-directory: apps/backend
+        run: python scripts/e2e_security.py
+
+  build-windows-installers:
+    name: Build Tauri + NSIS + MSI + teste de instalação
+    needs: backend-regression
+    runs-on: windows-2022
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Toolchain Rust (MSVC)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache do Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - name: Testes unitários do lançador (Rust)
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --locked
+
+      - name: Instalar tauri-cli 2.x
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: Gerar instaladores NSIS e MSI
+        working-directory: apps/desktop/src-tauri
+        run: cargo tauri build --bundles nsis,msi
+
+      - name: Verificar artefatos e conteúdo do pacote
+        working-directory: apps/desktop/src-tauri
+        run: |
+          $bundle = "target/release/bundle"
+          $nsis = Get-ChildItem "$bundle/nsis" -Filter "*-setup.exe" | Select-Object -First 1
+          $msi = Get-ChildItem "$bundle/msi" -Filter "*.msi" | Select-Object -First 1
+          if (-not $nsis) { throw "instalador NSIS não foi gerado" }
+          if (-not $msi) { throw "instalador MSI não foi gerado" }
+          Write-Host "NSIS: $($nsis.FullName) ($($nsis.Length) bytes)"
+          Write-Host "MSI:  $($msi.FullName) ($($msi.Length) bytes)"
+          # Conteúdo do backend e da interface copiados como recursos do aplicativo
+          foreach ($f in @("target/release/backend/ure/server.py", "target/release/backend/ure/web/index.html")) {
+              if (-not (Test-Path $f)) { throw "recurso ausente no build: $f" }
+          }
+          # MSI: extração administrativa (sem instalar) e conferência do conteúdo
+          $extract = Join-Path $env:RUNNER_TEMP "msi-admin"
+          New-Item -ItemType Directory -Force -Path $extract | Out-Null
+          $p = Start-Process msiexec -ArgumentList @("/a", $msi.FullName, "/qn", "TARGETDIR=$extract") -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "extração administrativa do MSI falhou (código $($p.ExitCode))" }
+          $msiExe = Get-ChildItem $extract -Recurse -Filter "ure-desktop.exe" | Select-Object -First 1
+          $msiServer = Get-ChildItem $extract -Recurse -Filter "server.py" | Where-Object { $_.FullName -like "*\backend\ure\*" } | Select-Object -First 1
+          $msiWeb = Get-ChildItem $extract -Recurse -Filter "index.html" | Where-Object { $_.FullName -like "*\backend\ure\web\*" } | Select-Object -First 1
+          if (-not $msiExe) { throw "MSI não contém ure-desktop.exe" }
+          if (-not $msiServer) { throw "MSI não contém o backend (server.py)" }
+          if (-not $msiWeb) { throw "MSI não contém a interface (index.html)" }
+          Write-Host "MSI contém ure-desktop.exe, backend e interface."
+
+      - name: Teste de instalação NSIS (instalar, abrir, analisar, encerrar, desinstalar)
+        working-directory: apps/desktop/src-tauri
+        run: |
+          $nsis = Get-ChildItem "target/release/bundle/nsis" -Filter "*-setup.exe" | Select-Object -First 1
+          & "$env:GITHUB_WORKSPACE/apps/desktop/scripts/smoke-windows.ps1" `
+              -Installer $nsis.FullName `
+              -RepoRoot $env:GITHUB_WORKSPACE `
+              -Work (Join-Path $env:RUNNER_TEMP "ure-smoke") `
+              -Python python
+
+      - name: Copiar instaladores para a pasta de artifacts
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP/out" | Out-Null
+          Copy-Item "apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe" "$env:RUNNER_TEMP/out/"
+          Copy-Item "apps/desktop/src-tauri/target/release/bundle/msi/*.msi" "$env:RUNNER_TEMP/out/"
+          Copy-Item (Join-Path $env:RUNNER_TEMP "ure-smoke/smoke-results.json") "$env:RUNNER_TEMP/out/"
+          Get-ChildItem "$env:RUNNER_TEMP/out" | Format-Table Name, Length
+
+      - name: Artifact — instalador NSIS (.exe)
+        uses: actions/upload-artifact@v4
+        with:
+          name: universal-reverse-engine-windows-nsis
+          path: ${{ runner.temp }}/out/*-setup.exe
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Artifact — instalador MSI (.msi)
+        uses: actions/upload-artifact@v4
+        with:
+          name: universal-reverse-engine-windows-msi
+          path: ${{ runner.temp }}/out/*.msi
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Artifact — resultados do teste de instalação
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-smoke-results
+          path: ${{ runner.temp }}/out/smoke-results.json
+          if-no-files-found: warn
+          retention-days: 14
