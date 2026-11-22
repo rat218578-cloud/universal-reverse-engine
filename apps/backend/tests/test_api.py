@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import tempfile
 import unittest
@@ -109,7 +110,11 @@ class ApiFlowTests(ApiCase):
         self.assertEqual(art["sha256"], hashlib.sha256(pe.read_bytes()).hexdigest())
         self.assertFalse(art["details"]["extension_mismatch"])
         stored = self.settings.data_dir / "projects" / pid / "artifacts" / art["id"] / "original" / "w32.exe"
-        self.assertEqual(stored.stat().st_mode & 0o777, 0o444)
+        if os.name == "nt":
+            # Windows não usa bits de modo POSIX: o atributo somente leitura aparece em os.access
+            self.assertFalse(os.access(stored, os.W_OK), "arquivo original deve ser somente leitura")
+        else:
+            self.assertEqual(stored.stat().st_mode & 0o777, 0o444)
         self.assertEqual(stored.read_bytes(), pe.read_bytes())
 
     def test_text_disguised_as_exe_rejected_and_cleaned(self) -> None:

@@ -135,7 +135,9 @@ class AuthTokenTests(ApiCase):
             t1 = s1.ure_app.settings.token  # type: ignore[attr-defined]
             s1.server_close()
             token_file = tmp / "d" / "session.token"
-            self.assertEqual(token_file.stat().st_mode & 0o777, 0o600)
+            if os.name != "nt":
+                # Windows não modela bits de modo POSIX; a proteção depende das ACLs do perfil do usuário
+                self.assertEqual(token_file.stat().st_mode & 0o777, 0o600)
             self.assertEqual(load_or_create_token(tmp / "d"), t1)
             s2 = make_server(Settings(data_dir=tmp / "d", port=0))
             self.assertEqual(s2.ure_app.settings.token, t1)  # type: ignore[attr-defined]

@@ -24,7 +24,8 @@ class EnvFileTests(unittest.TestCase):
 
     def test_values_loaded_from_file(self) -> None:
         f = self.tmp / "ure.env"
-        f.write_text("# comentário\nURE_PORT=9123\nURE_MAX_UPLOAD_MB = 64\nURE_AI_ENABLED=\"0\"\nOUTRA_VAR=1\n")
+        f.write_text("# comentário\nURE_PORT=9123\nURE_MAX_UPLOAD_MB = 64\nURE_AI_ENABLED=\"0\"\nOUTRA_VAR=1\n",
+                     encoding="utf-8")
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("URE_PORT", None)
             os.environ.pop("URE_MAX_UPLOAD_MB", None)
