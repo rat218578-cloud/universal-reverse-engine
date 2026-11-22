@@ -34,6 +34,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Instalar setuptools (exigido pelo build sem isolamento)
+        run: python -m pip install "setuptools>=68" wheel
       - name: Gerar wheel, código-fonte e somas
         run: python scripts/build_release.py
       - uses: actions/upload-artifact@v4
