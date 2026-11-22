@@ -1,0 +1,420 @@
+"""API HTTP (biblioteca padrão), interface estática e servidor. Rotas em /api/v1."""
+from __future__ import annotations
+
+import dataclasses
+import hashlib
+import hmac
+import json
+import mimetypes
+import os
+import re
+import shutil
+import sys
+import traceback
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import Any, Callable
+from urllib.parse import parse_qs, unquote, urlparse
+
+from . import __version__
+from .config import MB, Settings
+from .db import Store, utcnow
+from .files import build_tree, export_project_zip, read_preview
+from .identify import KIND_APK, KIND_JAR, KIND_PE, KIND_ZIP, UPLOADABLE_KINDS, identify
+from .safezip import ArchiveLimitError, UnsafeArchiveError, safe_extract_zip
+from .storage import (
+    READ_ROOTS,
+    PathRejectedError,
+    artifact_root,
+    ensure_layout,
+    make_readonly,
+    new_id,
+    safe_join,
+    valid_id,
+)
+
+WEB_ROOT = Path(__file__).resolve().parents[2] / "web"
+CHUNK = MB
+JSON_LIMIT = 64 * 1024
+EXTRACTABLE = frozenset({KIND_APK, KIND_JAR, KIND_ZIP})
+EXPECTED_EXT = {KIND_APK: {"apk", "zip"}, KIND_PE: {"exe", "dll", "sys", "scr"}}
+_UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
+ID = r"([^/]+)"
+CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'"
+
+
+class ApiError(Exception):
+    def __init__(self, status: int, message: str) -> None:
+        super().__init__(message)
+        self.status = status
+        self.message = message
+
+
+@dataclass
+class FileResponse:
+    path: Path
+    mime: str
+    filename: str | None = None
+
+
+def sanitize_filename(raw: str) -> str:
+    base = raw.replace("\\", "/").split("/")[-1]
+    clean = _UNSAFE.sub("_", base).strip("._")[:120]
+    return clean or "upload.bin"
+
+
+def _extension_mismatch(name: str, kind: str) -> bool:
+    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    return ext not in EXPECTED_EXT.get(kind, set())
+
+
+def _summarize(info: dict[str, Any]) -> dict[str, Any]:
+    summary: dict[str, Any] = {"kind": info["kind"]}
+    if "reason" in info:
+        summary["reason"] = info["reason"]
+    if info["kind"] == KIND_PE:
+        pe = dict(info["details"])
+        imports = pe.pop("imports", {})
+        pe["imported_dlls"] = {dll: len(names) for dll, names in imports.items()}
+        summary["pe"] = pe
+    elif "details" in info:
+        summary["details"] = info["details"]
+    return summary
+
+
+class App:
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        settings.data_dir.mkdir(parents=True, exist_ok=True)
+        self.store = Store(settings.data_dir / "ure.sqlite3")
+        self.store.recover_interrupted_jobs()
+
+    def project_or_404(self, pid: str) -> dict[str, Any]:
+        if not valid_id(pid):
+            raise ApiError(400, "identificador inválido")
+        project = self.store.get_project(pid)
+        if project is None:
+            raise ApiError(404, "projeto não encontrado")
+        return project
+
+    def artifact_or_404(self, pid: str, aid: str) -> dict[str, Any]:
+        self.project_or_404(pid)
+        if not valid_id(aid):
+            raise ApiError(400, "identificador inválido")
+        art = self.store.get_artifact(pid, aid)
+        if art is None:
+            raise ApiError(404, "artefato não encontrado")
+        return art
+
+    def root_of(self, pid: str, aid: str) -> Path:
+        return artifact_root(self.settings.data_dir, pid, aid)
+
+
+# --- rotas ----------------------------------------------------------------
+
+def create_project(a: App, h: Any, m: Any, q: dict[str, str]) -> tuple[int, Any]:
+    body = h.read_json()
+    name = str(body.get("name", "")).strip()
+    if not 1 <= len(name) <= 120:
+        raise ApiError(400, "nome deve ter de 1 a 120 caracteres")
+    desc = str(body.get("description", ""))[:2000]
+    return 201, a.store.create_project(new_id(), name, desc)
+
+
+def get_project(a: App, h: Any, m: Any, q: dict[str, str]) -> tuple[int, Any]:
+    return 200, a.project_or_404(m.group(1))
+
+
+def delete_project(a: App, h: Any, m: Any, q: dict[str, str]) -> tuple[int, Any]:
+    project = a.project_or_404(m.group(1))
+    confirm = unquote(h.headers.get("X-Confirm-Delete") or "")
+    if confirm != project["name"]:
+        raise ApiError(409, "confirmação não confere: envie o nome do projeto em X-Confirm-Delete")
+    shutil.rmtree(a.settings.data_dir / "projects" / project["id"], ignore_errors=True)
+    a.store.delete_project(project["id"])
+    return 200, {"deleted": project["id"]}
+
+
+def list_artifacts(a: App, h: Any, m: Any, q: dict[str, str]) -> tuple[int, Any]:
+    a.project_or_404(m.group(1))
+    return 200, {"artifacts": a.store.list_artifacts(m.group(1))}
+
+
+def get_artifact(a: App, h: Any, m: Any, q: dict[str, str]) -> tuple[int, Any]:
+    return 200, a.artifact_or_404(m.group(1), m.group(2))
+
+
+def upload_artifact(a: App, h: Any, m: Any, q: dict[str, str]) -> tuple[int, Any]:
+    pid = m.group(1)
+    a.project_or_404(pid)
+    length = h.headers.get("Content-Length")
+    if length is None:
+        raise ApiError(411, "Content-Length obrigatório")
+    try:
+        size = int(length)
+    except ValueError as exc:
+        raise ApiError(400, "Content-Length inválido") from exc
+    if size <= 0:
+        raise ApiError(400, "arquivo vazio")
+    if size > a.settings.max_upload_bytes:
+        raise ApiError(413, f"arquivo excede o limite de {a.settings.max_upload_bytes // MB} MB")
+    name = sanitize_filename(unquote(h.headers.get("X-Filename") or ""))
+    aid = new_id()
+    root = a.root_of(pid, aid)
+    ensure_layout(root)
+    tmp = root / "original" / ".upload.part"
+    digest = hashlib.sha256()
+    remaining = size
+    try:
+        with tmp.open("wb") as out:
+            while remaining:
+                chunk = h.rfile.read(min(CHUNK, remaining))
+                if not chunk:
+                    raise ApiError(400, "upload interrompido")
+                out.write(chunk)
+                digest.update(chunk)
+                remaining -= len(chunk)
+        info = identify(tmp)
+        if info["kind"] not in UPLOADABLE_KINDS:
+            reason = info.get("reason", "")
+            raise ApiError(415, f"formato não aceito: {info['kind']}. {reason}".strip())
+        final = root / "original" / name
+        os.replace(tmp, final)
+        make_readonly(final)
+    except BaseException:
+        shutil.rmtree(root, ignore_errors=True)
+        raise
+    (root / "reports" / "identify.json").write_text(
+        json.dumps(info, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+    )
+    details = _summarize(info)
+    details["extension_mismatch"] = _extension_mismatch(name, info["kind"])
+    row = a.store.add_artifact(
+        {
+            "id": aid,
+            "project_id": pid,
+            "filename": name,
+            "kind": info["kind"],
+            "size": size,
+            "sha256": digest.hexdigest(),
+            "status": "uploaded",
+            "details": details,
+            "created_at": utcnow(),
+        }
+    )
+    return 201, row
+
+
+def _read_root(q: dict[str, str]) -> str:
+    root = q.get("root", "original")
+    if root not in READ_ROOTS:
+        raise ApiError(400, "raiz inválida")
+    return root
+
+
+def tree_artifact(a: App, h: Any, m: Any, q: dict[str, str]) -> tuple[int, Any]:
+    art = a.artifact_or_404(m.group(1), m.group(2))
+    base = a.root_of(art["project_id"], art["id"]) / _read_root(q)
+    target = safe_join(base, q.get("path", ""))
+    return 200, build_tree(target)
+
+
+def preview_artifact(a: App, h: Any, m: Any, q: dict[str, str]) -> tuple[int, Any]:
+    art = a.artifact_or_404(m.group(1), m.group(2))
+    base = a.root_of(art["project_id"], art["id"]) / _read_root(q)
+    target = safe_join(base, q.get("path", ""))
+    if not target.exists():
+        raise ApiError(404, "arquivo não encontrado")
+    return 200, {"path": q.get("path", ""), **read_preview(target)}
+
+
+def extract_artifact(a: App, h: Any, m: Any, q: dict[str, str]) -> tuple[int, Any]:
+    art = a.artifact_or_404(m.group(1), m.group(2))
+    if art["kind"] not in EXTRACTABLE:
+        raise ApiError(409, f"tipo {art['kind']} não é extraível")
+    root = a.root_of(art["project_id"], art["id"])
+    src = root / "original" / art["filename"]
+    if not src.is_file():
+        raise ApiError(404, "arquivo original ausente")
+    out = root / "extracted"
+    shutil.rmtree(out, ignore_errors=True)
+    out.mkdir(parents=True)
+    s = a.settings
+    try:
+        report = safe_extract_zip(
+            src, out, max_entries=s.max_entries, max_total_bytes=s.max_extract_bytes, max_ratio=s.max_ratio
+        )
+    except (UnsafeArchiveError, ArchiveLimitError) as exc:
+        shutil.rmtree(out, ignore_errors=True)
+        a.store.update_artifact(
+            art["id"], status="rejected", details={**art["details"], "extraction": {"error": str(exc)}}
+        )
+        raise
+    result = dataclasses.asdict(report)
+    a.store.update_artifact(art["id"], status="extracted", details={**art["details"], "extraction": result})
+    return 200, a.store.get_artifact(art["project_id"], art["id"])
+
+
+def export_artifact(a: App, h: Any, m: Any, q: dict[str, str]) -> tuple[int, Any]:
+    art = a.artifact_or_404(m.group(1), m.group(2))
+    root = a.root_of(art["project_id"], art["id"])
+    include = q.get("include_original") == "1"
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+    out = root / "exports" / f"export-{stamp}.zip"
+    export_project_zip(root, out, include)
+    return 200, FileResponse(out, "application/zip", f"{Path(art['filename']).stem}-export.zip")
+
+
+ROUTES: list[tuple[str, re.Pattern[str], Callable[..., tuple[int, Any]]]] = [
+    ("GET", re.compile(r"/api/v1/health"), lambda a, h, m, q: (200, {
+        "status": "ok", "version": __version__, "ai_enabled": a.settings.ai_enabled,
+        "auth_required": bool(a.settings.token)})),
+    ("GET", re.compile(r"/api/v1/projects"), lambda a, h, m, q: (200, {"projects": a.store.list_projects()})),
+    ("POST", re.compile(r"/api/v1/projects"), create_project),
+    ("GET", re.compile(rf"/api/v1/projects/{ID}"), get_project),
+    ("DELETE", re.compile(rf"/api/v1/projects/{ID}"), delete_project),
+    ("GET", re.compile(rf"/api/v1/projects/{ID}/artifacts"), list_artifacts),
+    ("POST", re.compile(rf"/api/v1/projects/{ID}/artifacts"), upload_artifact),
+    ("GET", re.compile(rf"/api/v1/projects/{ID}/artifacts/{ID}"), get_artifact),
+    ("GET", re.compile(rf"/api/v1/projects/{ID}/artifacts/{ID}/tree"), tree_artifact),
+    ("GET", re.compile(rf"/api/v1/projects/{ID}/artifacts/{ID}/file"), preview_artifact),
+    ("POST", re.compile(rf"/api/v1/projects/{ID}/artifacts/{ID}/extract"), extract_artifact),
+    ("GET", re.compile(rf"/api/v1/projects/{ID}/artifacts/{ID}/export"), export_artifact),
+]
+
+
+def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
+    class Handler(BaseHTTPRequestHandler):
+        server_version = "URE/0.1"
+        sys_version = ""
+
+        def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+            return
+
+        def do_GET(self) -> None:  # noqa: N802
+            self._dispatch("GET")
+
+        def do_POST(self) -> None:  # noqa: N802
+            self._dispatch("POST")
+
+        def do_DELETE(self) -> None:  # noqa: N802
+            self._dispatch("DELETE")
+
+        def do_PUT(self) -> None:  # noqa: N802
+            self._dispatch("PUT")
+
+        def do_PATCH(self) -> None:  # noqa: N802
+            self._dispatch("PATCH")
+
+        def _dispatch(self, method: str) -> None:
+            url = urlparse(self.path)
+            path = unquote(url.path)
+            query = {k: v[-1] for k, v in parse_qs(url.query, keep_blank_values=True).items()}
+            try:
+                if method not in ("GET", "POST", "DELETE"):
+                    raise ApiError(405, "método não permitido")
+                if not path.startswith("/api/"):
+                    if method != "GET":
+                        raise ApiError(405, "método não permitido")
+                    self._static(path)
+                    return
+                self._check_auth()
+                for route_method, pattern, fn in ROUTES:
+                    if route_method != method:
+                        continue
+                    match = pattern.fullmatch(path)
+                    if match:
+                        status, payload = fn(app, self, match, query)
+                        self._send(status, payload)
+                        return
+                raise ApiError(404, "rota inexistente")
+            except ApiError as exc:
+                self._json(exc.status, {"error": exc.message})
+            except PathRejectedError as exc:
+                self._json(400, {"error": str(exc)})
+            except UnsafeArchiveError as exc:
+                self._json(422, {"error": str(exc)})
+            except ArchiveLimitError as exc:
+                self._json(413, {"error": str(exc)})
+            except Exception:
+                traceback.print_exc(file=sys.stderr)
+                self._json(500, {"error": "erro interno"})
+
+        def _check_auth(self) -> None:
+            token = app.settings.token
+            if not token:
+                return
+            supplied = (self.headers.get("Authorization") or "").encode("utf-8", "replace")
+            if not hmac.compare_digest(supplied, f"Bearer {token}".encode()):
+                raise ApiError(401, "não autorizado")
+
+        def read_json(self) -> dict[str, Any]:
+            n = int(self.headers.get("Content-Length") or 0)
+            if n < 0 or n > JSON_LIMIT:
+                raise ApiError(413, "corpo JSON excede o limite")
+            raw = self.rfile.read(n) if n else b"{}"
+            try:
+                data = json.loads(raw or b"{}")
+            except ValueError as exc:
+                raise ApiError(400, "JSON inválido") from exc
+            if not isinstance(data, dict):
+                raise ApiError(400, "o corpo deve ser um objeto JSON")
+            return data
+
+        def _headers(self, status: int, ctype: str, length: int, extra: dict[str, str] | None = None) -> None:
+            self.send_response(status)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(length))
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Content-Security-Policy", CSP)
+            self.send_header("Cache-Control", "no-store")
+            for key, value in (extra or {}).items():
+                self.send_header(key, value)
+            self.end_headers()
+
+        def _json(self, status: int, payload: Any) -> None:
+            body = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
+            self._headers(status, "application/json; charset=utf-8", len(body))
+            self.wfile.write(body)
+
+        def _send(self, status: int, payload: Any) -> None:
+            if isinstance(payload, FileResponse):
+                extra = {}
+                if payload.filename:
+                    extra["Content-Disposition"] = f'attachment; filename="{payload.filename}"'
+                self._stream(payload.path, payload.mime, extra)
+            else:
+                self._json(status, payload)
+
+        def _stream(self, path: Path, mime: str, extra: dict[str, str] | None = None) -> None:
+            self._headers(200, mime, path.stat().st_size, extra)
+            with path.open("rb") as f:
+                while True:
+                    chunk = f.read(CHUNK)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+
+        def _static(self, path: str) -> None:
+            rel = "index.html" if path in ("", "/") else path.lstrip("/")
+            try:
+                target = safe_join(WEB_ROOT, rel)
+            except PathRejectedError as exc:
+                raise ApiError(404, "não encontrado") from exc
+            if not target.is_file():
+                raise ApiError(404, "não encontrado")
+            mime = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+            self._stream(target, mime)
+
+    return Handler
+
+
+def make_server(settings: Settings) -> ThreadingHTTPServer:
+    settings.check_bind()
+    app = App(settings)
+    server = ThreadingHTTPServer((settings.host, settings.port), make_handler(app))
+    server.daemon_threads = True
+    return server
