@@ -25,6 +25,7 @@ class Settings:
     ollama_url: str = "http://127.0.0.1:11434"
     ai_daily_budget: int = 50
     job_workers: int = 1
+    ollama_model: str = "llama3.2"
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -47,6 +48,7 @@ class Settings:
             ollama_url=env.get("URE_OLLAMA_URL", "http://127.0.0.1:11434"),
             ai_daily_budget=num("URE_AI_DAILY_BUDGET", 50),
             job_workers=num("URE_JOB_WORKERS", 1),
+            ollama_model=env.get("URE_OLLAMA_MODEL", "llama3.2"),
         )
 
     def check_bind(self) -> None:

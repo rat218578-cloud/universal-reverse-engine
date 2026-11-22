@@ -18,6 +18,7 @@ from ure.config import Settings
 class ApiCase(unittest.TestCase):
     token: str | None = None
     max_upload: int = 8 * 1024 * 1024
+    settings_extra: dict = {}
 
     def setUp(self) -> None:
         self._td = tempfile.mkdtemp()
@@ -27,6 +28,7 @@ class ApiCase(unittest.TestCase):
             port=0,
             max_upload_bytes=self.max_upload,
             token=self.token,
+            **self.settings_extra,
         )
         self.server = make_server(self.settings)
         self.port = self.server.server_address[1]

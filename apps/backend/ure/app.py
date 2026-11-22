@@ -21,6 +21,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from . import __version__
 from .config import MB, Settings
+from .ai import AIError, AIRouter
 from .analysis import run_analysis
 from .db import Store, utcnow
 from .files import build_tree, export_project_zip, read_preview
@@ -104,6 +105,7 @@ class App:
         self.store = Store(settings.data_dir / "ure.sqlite3")
         self.store.recover_interrupted_jobs()
         self.jobs = JobRunner(self.store, settings.job_workers)
+        self.ai = AIRouter(settings, self.store)
         self.jobs.register("analyze", lambda pid, aid, params, progress: run_analysis(self, pid, aid, params, progress))
 
     def project_or_404(self, pid: str) -> dict[str, Any]:
@@ -326,6 +328,30 @@ def tools_status(a: App, h: Any, m: Any, q: dict[str, str]) -> tuple[int, Any]:
     return 200, {"tools": probe_all()}
 
 
+def ai_status(a: App, h: Any, m: Any, q: dict[str, str]) -> tuple[int, Any]:
+    return 200, a.ai.status()
+
+
+def ask_artifact(a: App, h: Any, m: Any, q: dict[str, str]) -> tuple[int, Any]:
+    art = a.artifact_or_404(m.group(1), m.group(2))
+    body = h.read_json()
+    path = a.root_of(art["project_id"], art["id"]) / "reports" / "analysis.json"
+    if not path.is_file():
+        raise ApiError(409, "execute a análise antes de perguntar à IA")
+    report = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        result = a.ai.ask(
+            str(body.get("question", "")),
+            report,
+            provider=str(body.get("provider", "ollama")),
+            model=body.get("model") or None,
+            consent=body.get("consent") is True,
+        )
+    except AIError as exc:
+        raise ApiError(exc.status, exc.message) from exc
+    return 200, result
+
+
 ROUTES: list[tuple[str, re.Pattern[str], Callable[..., tuple[int, Any]]]] = [
     ("GET", re.compile(r"/api/v1/health"), lambda a, h, m, q: (200, {
         "status": "ok", "version": __version__, "ai_enabled": a.settings.ai_enabled,
@@ -347,6 +373,8 @@ ROUTES: list[tuple[str, re.Pattern[str], Callable[..., tuple[int, Any]]]] = [
     ("GET", re.compile(r"/api/v1/jobs/" + ID + "/events"), job_events),
     ("POST", re.compile(r"/api/v1/jobs/" + ID + "/retry"), retry_job),
     ("GET", re.compile(r"/api/v1/tools"), tools_status),
+    ("GET", re.compile(r"/api/v1/ai/status"), ai_status),
+    ("POST", re.compile(rf"/api/v1/projects/{ID}/artifacts/{ID}/ask"), ask_artifact),
 ]
 
 
