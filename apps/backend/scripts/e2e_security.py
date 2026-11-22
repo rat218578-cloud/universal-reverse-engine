@@ -2,6 +2,7 @@ import json, os, shutil, socket, struct, subprocess, sys, tempfile, time, urllib
 sys.path.insert(0, ".")
 from pathlib import Path
 from tests.helpers import make_zip, synthetic_apk
+from tests.helpers import find_real_pe
 from tests.test_security import forge_central_sizes
 
 DATA = Path(tempfile.mkdtemp(prefix="ure-e2e-"))
@@ -104,7 +105,8 @@ try:
     check("visualização do arquivo extraído", s == 200 and b"hello from ure" in b, f"HTTP {s}")
 
     # --- Trabalho pesado com token: análise do PE real ---
-    pe = sorted(glob.glob("/opt/pipx/shared/lib/python*/site-packages/pip/_vendor/distlib/w32.exe"))
+    pe_path = find_real_pe()
+    pe = [str(pe_path)] if pe_path else []
     if pe:
         s, b = req("POST", f"/api/v1/projects/{pid}/artifacts", Path(pe[0]).read_bytes(), {"X-Filename": "w32.exe", **AUTH})
         aid3 = json.loads(b)["id"]

@@ -11,7 +11,7 @@ Nada aqui foi declarado como testado sem execução.
 | Item | Situação |
 |---|---|
 | Sistema | Linux, 1 CPU, 3,9 GiB de RAM, Python 3.12.3, Node 22.23.5 |
-| Navegador | Chromium 157.0.8103.78 headless, via Playwright 1.63.0 (`/opt/pw-browsers`) |
+| Navegador | Chromium 157.0.8103.78 headless, via Playwright 1.63.0 (navegadores no diretório definido por `PLAYWRIGHT_BROWSERS_PATH`) |
 | Java | OpenJDK 21 (runtime). Sem `javac`. |
 | Motores de análise | apktool, JADX, apkanalyzer, ilspycmd, Ghidra, aapt/aapt2, dotnet: **ausentes** |
 | IA local | Ollama ausente; nada em `127.0.0.1:11434`; nenhum modelo (`.gguf`/`.safetensors`) no disco |
@@ -50,7 +50,7 @@ Nada aqui foi declarado como testado sem execução.
 | Coerência interface × API | comparação automática das 18 chamadas do `app.js` com as rotas | 0 incompatíveis |
 | Tracebacks no log do servidor | E2E e cenários de desconexão | 0 após as correções |
 
-Capturas de tela das telas percorridas estão em `/home/claude/validation/shots-final/`.
+Capturas de tela das telas percorridas ficam no diretório definido por `URE_E2E_SHOTS` (padrão: pasta temporária do sistema).
 
 ## 3. Reprovado na RC original e corrigido nesta validação
 

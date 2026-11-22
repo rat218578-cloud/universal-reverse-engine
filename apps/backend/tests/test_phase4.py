@@ -9,11 +9,11 @@ import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from tests.helpers import synthetic_apk
+from tests.helpers import AWS_EXAMPLE_KEY, synthetic_apk
 from tests.test_api import ApiCase
 from ure.ai import build_messages
 
-AKIA = "AKIAIOSFODNN7EXAMPLE"
+AKIA = AWS_EXAMPLE_KEY
 
 
 class FakeOllama:

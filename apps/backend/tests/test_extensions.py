@@ -11,14 +11,14 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from tests.helpers import synthetic_apk
+from tests.helpers import AWS_EXAMPLE_KEY, synthetic_apk
 from tests.test_api import ApiCase
 from ure.ai import AIError, AIRouter, url_is_allowed
 from ure.compliance import detect_license_text, scan_licenses, size_summary
 from ure.config import Settings
 from ure.db import Store
 
-AKIA = "AKIAIOSFODNN7EXAMPLE"
+AKIA = AWS_EXAMPLE_KEY
 KEY = "chave-de-teste-nao-real-123"
 REPORT = {"filename": "a.apk", "kind": "apk", "integrity": "ok", "dependencies": {"dex_files": ["classes.dex"]},
           "indicators": [], "engines": {"apktool": {"status": "missing"}},

@@ -22,9 +22,9 @@ from playwright.sync_api import expect, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from tests.helpers import synthetic_apk  # noqa: E402
+from tests.helpers import find_real_pe, synthetic_apk  # noqa: E402
 
-SHOTS = Path(os.environ.get("URE_E2E_SHOTS", "/home/claude/validation/shots"))
+SHOTS = Path(os.environ.get("URE_E2E_SHOTS", Path(tempfile.gettempdir()) / "ure-validation-shots"))
 SHOTS.mkdir(parents=True, exist_ok=True)
 PORT = int(os.environ.get("URE_E2E_PORT", "8789"))
 SERVER_BIN = os.environ.get("URE_E2E_SERVER_BIN", "ure-server")
@@ -60,8 +60,9 @@ def main() -> None:
     base = f"http://127.0.0.1:{PORT}"
     work = Path(tempfile.mkdtemp(prefix="ure-files-"))
     apk = synthetic_apk(work / "app.apk")
-    pe = Path(sorted(glob.glob("/opt/pipx/shared/lib/python*/site-packages/pip/_vendor/distlib/w32.exe")
-                     + glob.glob("/usr/lib/python3/dist-packages/pip/_vendor/distlib/w32.exe"))[0])
+    pe = find_real_pe()
+    if pe is None:
+        raise SystemExit("PE real não encontrado: defina URE_TEST_PE com o caminho de um executável PE")
     fake = work / "falso.exe"
     fake.write_text("isto é texto, não um executável\n" * 5)
     try:

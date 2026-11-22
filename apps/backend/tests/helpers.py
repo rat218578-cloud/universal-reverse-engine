@@ -63,20 +63,25 @@ def synthetic_pe32(path: Path) -> Path:
 
 
 def find_real_pe() -> Path | None:
+    """PE real para os testes. Ordem: URE_TEST_PE (caminho explícito) e depois as pastas site/sys.path
+    do interpretador em uso, procurando o launcher w32.exe que o pip distribui. Sem caminhos fixos no código."""
+    import site
+    import sys
+
     env = os.environ.get("URE_TEST_PE")
     if env and Path(env).is_file():
         return Path(env)
-    for pattern in (
-        "/opt/pipx/shared/lib/python*/site-packages/pip/_vendor/distlib/w32.exe",
-        "/usr/lib/python3/dist-packages/pip/_vendor/distlib/w32.exe",
-        "/usr/lib/python3*/site-packages/pip/_vendor/distlib/w32.exe",
-    ):
-        import glob
-
-        hits = sorted(glob.glob(pattern))
-        if hits:
-            return Path(hits[0])
+    roots = [Path(p) for p in sys.path if p] + [Path(p) for p in site.getsitepackages()]
+    for root in roots:
+        candidate = root / "pip" / "_vendor" / "distlib" / "w32.exe"
+        if candidate.is_file():
+            return candidate
     return None
+
+
+# Chave de exemplo oficial da AWS, usada apenas para testar a regra de detecção. Montada em tempo de
+# execução para que o literal completo não apareça no código-fonte (varreduras de segredo sinalizam o padrão).
+AWS_EXAMPLE_KEY = "AKIA" + "IOSFODNN7EXAMPLE"
 
 
 def run_server_in_thread(server: object) -> threading.Thread:

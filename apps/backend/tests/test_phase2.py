@@ -11,13 +11,13 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tests.helpers import find_real_pe, synthetic_apk, synthetic_pe32
+from tests.helpers import AWS_EXAMPLE_KEY, find_real_pe, synthetic_apk, synthetic_pe32
 from tests.test_api import ApiCase
 from ure.app import App
 from ure.config import Settings
 from ure.tools import SPECS_BY_KEY, probe, probe_all, run_tool
 
-AKIA = "AKIAIOSFODNN7EXAMPLE"  # chave de exemplo oficial da AWS, usada apenas para testar a regra
+AKIA = AWS_EXAMPLE_KEY  # chave de exemplo oficial da AWS, usada apenas para testar a regra
 
 
 class ToolRegistryTests(unittest.TestCase):

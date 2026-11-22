@@ -20,7 +20,7 @@ from pathlib import Path
 from unittest import mock
 
 from tests import helpers
-from tests.helpers import make_zip, synthetic_apk
+from tests.helpers import AWS_EXAMPLE_KEY, make_zip, synthetic_apk
 from tests.test_api import ApiCase
 from tests.test_extensions import FakeOpenAI
 from tests.test_phase4 import FakeOllama
@@ -37,7 +37,7 @@ from ure.secrets import scan_secrets
 from ure.tools import run_tool
 
 LIMITS = {"max_entries": 100_000, "max_total_bytes": 2 * 1024**3, "max_ratio": 200.0}
-AKIA = "AKIAIOSFODNN7EXAMPLE"
+AKIA = AWS_EXAMPLE_KEY
 
 
 def raw_request(port: int, data: bytes, timeout: float = 5.0) -> bytes:
