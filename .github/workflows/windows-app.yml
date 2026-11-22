@@ -21,6 +21,9 @@ jobs:
     name: Regressão do backend no Windows
     runs-on: windows-2022
     timeout-minutes: 60
+    permissions:
+      contents: read
+      checks: write  # só para publicar a saída das falhas num check run legível
     defaults:
       run:
         shell: pwsh
@@ -47,6 +50,31 @@ jobs:
       - name: E2E de segurança com servidor real
         working-directory: apps/backend
         run: python scripts/e2e_security.py
+
+      - name: Publicar a saída completa das falhas (check run)
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const log = fs.readFileSync('apps/backend/unittest.log', 'utf8');
+            const sep = '='.repeat(70);
+            let start = log.indexOf('\n' + sep);
+            if (start < 0) start = 0;
+            const text = log.slice(start, start + 60000);
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'Windows unittest: detalhes das falhas',
+              head_sha: context.sha,
+              status: 'completed',
+              conclusion: 'neutral',
+              output: {
+                title: 'Falhas do unittest no Windows',
+                summary: 'Saída completa dos testes que falharam (trecho inicial da seção de falhas).',
+                text: text || 'sem saída capturada',
+              },
+            });
 
   build-windows-installers:
     name: Build Tauri + NSIS + MSI + teste de instalação
