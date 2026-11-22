@@ -40,7 +40,7 @@ de segredos; Windows não testado; interface não testada em navegador. Detalhes
 - Ollama: testado contra servidor falso em loopback.
 - Provedor OpenAI-compatível: testado contra servidor falso em loopback.
 - Dockerfile: não construído (Docker ausente).
-- Esqueleto Tauri em `apps/desktop`: não compilado (Rust ausente).
+- Aplicativo Windows (`apps/desktop`, Tauri 2): compila e roda no Linux (testes Rust, execução sob Xvfb, encerramento verificado). **Build e execução no Windows não verificados**; instalador `.exe`/`.msi` não gerado.
 - CI em `.github/workflows/ci.yml`: não executado (sem remoto).
 
 ## Parcial
@@ -54,11 +54,11 @@ de segredos; Windows não testado; interface não testada em navegador. Detalhes
 - Repositório no GitHub, push, publicação e commits automatizados em remoto.
 - Usuários e sessões (só token único).
 - Análise de Mach-O e ELF.
-- Desktop empacotado e assinado.
+- Instalador Windows gerado e assinado (ver `apps/desktop/README.md`).
 
 ## Bloqueado por falta de rede ou ferramentas
 - Instalação de apktool, JADX, apkanalyzer, ILSpy, Ghidra, LIEF, Ollama e modelos.
-- Docker, Rust/Tauri, GitHub CLI, navegador headless, APK e DEX reais.
+- Docker, GitHub CLI, alvo Windows do Rust (download bloqueado), APK e DEX reais.
 
 ## Como executar
 ```

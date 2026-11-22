@@ -58,7 +58,12 @@ py -3.12 -m venv %USERPROFILE%\ure-venv
 %USERPROFILE%\ure-venv\Scripts\ure-server
 ```
 Limitações conhecidas no Windows: o limite de memória dos motores externos não é aplicado (depende de POSIX);
-permissões do arquivo de token não se aplicam da mesma forma. Não há instalador `.exe`.
+permissões do arquivo de token não se aplicam da mesma forma.
+
+### Aplicativo desktop para Windows (em desenvolvimento)
+O aplicativo desktop inicia este mesmo backend e abre a interface nele. Compilação, requisitos e
+limitações estão em `apps/desktop/README.md`. Neste repositório **não há instalador Windows gerado**: o
+build Windows depende de Windows com Rust, Visual Studio Build Tools e tauri-cli, e não foi executado aqui.
 
 ## Configuração
 

@@ -1,5 +1,22 @@
 # Changelog
 
+## Não lançado — aplicativo Windows
+
+### Adicionado
+- Aplicativo desktop (Tauri 2) em `apps/desktop`: inicia o backend local, aguarda `/api/v1/health`, abre a
+  mesma interface web e encerra o backend ao sair. Erros aparecem em caixa de diálogo.
+- Token novo a cada execução, entregue ao backend por variável de ambiente e à janela só na origem local.
+- Encerramento do backend quando o aplicativo morre à força (vigia do pipe de controle, `URE_PARENT_WATCH`).
+- Testes de contrato do backend como processo (`apps/backend/tests/test_desktop.py`): token, Host,
+  persistência de projetos entre reinícios e liberação da porta.
+- Ícones provisórios em `apps/desktop/src-tauri/icons/`.
+
+### Corrigido
+- Ferramentas externas no Windows recebem o ambiente necessário (`SYSTEMROOT`, `PATHEXT`, `USERPROFILE` etc.).
+- Cancelamento e timeout de motores no Windows encerram a árvore de processos (`taskkill /T`).
+- Teste de limite de memória sem falso positivo causado pelo traceback que repete a linha de código.
+- Verificação de saúde do e2e aguarda a porta responder, não só o arquivo de token.
+
 ## 1.0.0 — 2026-11-22
 
 Primeira versão pública. Integra a RC 1.0.0rc1 e as correções da validação.
