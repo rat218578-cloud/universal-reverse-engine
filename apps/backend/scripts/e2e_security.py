@@ -13,8 +13,16 @@ if "URE_E2E_PYTHON" not in os.environ:
     # código-fonte: o pacote fica em apps/backend, que não é o diretório de dados
     env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
 srv = subprocess.Popen([PYTHON, "-m", "ure.server"], env=env, cwd=str(DATA), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-for _ in range(100):
-    if (DATA / "session.token").is_file() or srv.poll() is not None:
+def _healthy() -> bool:
+    # O token é criado antes da porta abrir: espera a porta responder, não só o arquivo.
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{PORT}/api/v1/health", timeout=1) as r:
+            return r.status == 200
+    except OSError:
+        return False
+
+for _ in range(200):
+    if srv.poll() is not None or ((DATA / "session.token").is_file() and _healthy()):
         break
     time.sleep(0.1)
 if srv.poll() is not None or not (DATA / "session.token").is_file():

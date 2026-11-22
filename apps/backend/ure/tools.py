@@ -14,6 +14,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Any
 
 from .config import MB
@@ -132,6 +133,35 @@ def _drain(stream: Any, path: Path, cap: int) -> None:
         stream.close()
 
 
+# Variáveis que o processo filho precisa para funcionar. Lista fixa: segredos do ambiente
+# do usuário não são repassados às ferramentas analisadas. No Windows, SYSTEMROOT e
+# companhia são indispensáveis: sem elas, quase nenhum programa inicia.
+_BASE_ENV_KEYS = ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "JAVA_HOME")
+_WINDOWS_ENV_KEYS = (
+    "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "USERPROFILE", "TEMP", "TMP",
+    "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "PROGRAMFILES", "PROGRAMFILES(X86)",
+)
+
+
+def child_env(environ: Mapping[str, str] | None = None, platform_name: str | None = None) -> dict[str, str]:
+    """Ambiente mínimo para motores externos, conforme a plataforma."""
+    source = os.environ if environ is None else environ
+    keys = _BASE_ENV_KEYS + (_WINDOWS_ENV_KEYS if (platform_name or os.name) == "nt" else ())
+    return {k: source[k] for k in keys if k in source}
+
+
+def kill_tree(proc: subprocess.Popen) -> None:
+    """Encerra o processo e os filhos. Em Windows, wrappers como apktool.bat iniciam um java
+    filho que sobreviveria ao kill direto; taskkill /T derruba a árvore inteira."""
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+            capture_output=True, timeout=30, check=False,
+        )
+    proc.kill()
+    proc.wait()
+
+
 def run_tool(
     argv: list[str],
     *,
@@ -150,7 +180,7 @@ def run_tool(
     limited = os.name == "posix"
     if limited:
         cmd = [sys.executable, "-c", _LIMIT_STUB, str(memory_mb * MB), *argv]
-    env = {k: os.environ[k] for k in ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "JAVA_HOME") if k in os.environ}
+    env = child_env()
     log.parent.mkdir(parents=True, exist_ok=True)
     kwargs: dict[str, Any] = {"stdin": subprocess.DEVNULL, "stdout": subprocess.PIPE}
     if stdout_file is not None:
@@ -175,12 +205,10 @@ def run_tool(
             status = "ok" if rc == 0 else "failed"
         except subprocess.TimeoutExpired:
             if cancel is not None and cancel.is_set():
-                proc.kill()
-                proc.wait()
+                kill_tree(proc)
                 status = "cancelled"
             elif time.monotonic() > deadline:
-                proc.kill()
-                proc.wait()
+                kill_tree(proc)
                 status = "timeout"
     for t in drains:
         t.join(timeout=10)
