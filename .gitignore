@@ -47,3 +47,6 @@ ure-validation-shots/
 .DS_Store
 Thumbs.db
 *.swp
+
+# artefatos gerados pelo tauri-build (schemas de capacidades)
+apps/desktop/src-tauri/gen/
