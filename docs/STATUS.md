@@ -52,6 +52,10 @@ Desktop (Tauri), Docker, criação de repositório privado no GitHub e commits a
 Quando uma ferramenta está ausente, o relatório registra `"status": "missing"` com o motivo.
 Nenhum resultado de ferramenta ausente é simulado.
 
+## Consumo de memória medido
+Servidor real (`python3 -m ure.server`) analisando o PE real `w32.exe`: 26,5 MB de RSS, pico de 26,6 MB
+(VmHWM). Medido em Linux, com um worker de job.
+
 ## Testes
 - `apps/backend`: `python3 -m unittest discover -s tests -t . -v`
   - identificação (PE real `w32.exe`, ELF real `/usr/bin/ls`, PE sintético, ZIP, JAR, corrompidos)
