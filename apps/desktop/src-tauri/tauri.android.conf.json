@@ -1,4 +1,13 @@
 {
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Universal Reverse Engine",
+        "url": "index.html"
+      }
+    ]
+  },
   "build": {
     "frontendDist": "../android/splash"
   }
