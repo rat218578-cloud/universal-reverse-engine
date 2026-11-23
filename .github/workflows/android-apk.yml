@@ -77,6 +77,18 @@ jobs:
           path: ~/.cargo/bin/cargo-tauri
           key: tauri-cli-${{ env.TAURI_CLI_VERSION }}-ubuntu-24.04-v1
 
+      # O Maven Central limita requisições por IP (HTTP 429). O cache das dependências do
+      # Gradle evita baixar tudo a cada execução.
+      - name: Cache do Gradle (dependências e wrapper)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('apps/desktop/android/overlay/**/*.gradle*', 'apps/desktop/android/overlay/**/*.properties', 'apps/desktop/android/overlay/**/*.toml') }}-v1
+          restore-keys: |
+            gradle-
+
       - name: Instalar tauri-cli
         if: steps.tauri-cli-cache.outputs.cache-hit != 'true'
         run: cargo install tauri-cli --version "$TAURI_CLI_VERSION" --locked
