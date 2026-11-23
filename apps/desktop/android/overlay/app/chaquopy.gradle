@@ -28,7 +28,7 @@ android {
 // variantes de 32 bits e x86 (armDebug, x86Debug); elas são desabilitadas porque o build só
 // compila arm64 e x86_64 (ver --target em docs/ANDROID.md).
 androidComponents {
-    beforeVariants { builder ->
+    beforeVariants(selector().all()) { builder ->
         def n = builder.name
         if (n.startsWith("arm") && !n.startsWith("arm64")) builder.enable = false
         if (n.startsWith("x86") && !n.startsWith("x86_64")) builder.enable = false
