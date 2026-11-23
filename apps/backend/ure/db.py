@@ -41,6 +41,10 @@ class Store:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(SCHEMA)
 
+    def close(self) -> None:
+        """Fecha a conexão (libera o arquivo, necessário no Windows antes de apagar a pasta)."""
+        self._conn.close()
+
     def _run(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
         with self._lock:
             cur = self._conn.execute(sql, params)

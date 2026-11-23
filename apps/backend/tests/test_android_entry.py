@@ -36,7 +36,7 @@ def _free_port() -> int:
 class AndroidEntryTests(unittest.TestCase):
     def setUp(self) -> None:
         self._saved = {k: os.environ.get(k) for k in ENV_KEYS}
-        self._tmp = tempfile.TemporaryDirectory()
+        self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.entry = _load_entry()
         self.data = Path(self._tmp.name) / "data"
 

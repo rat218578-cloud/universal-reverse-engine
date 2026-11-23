@@ -62,7 +62,11 @@ def stop() -> None:
         server, thread = _server, _thread
         _server = _thread = None
     if server is not None:
+        app = getattr(server, "ure_app", None)
         server.shutdown()
         server.server_close()
         if thread is not None:
             thread.join(timeout=5)
+        if app is not None:
+            app.jobs.shutdown()
+            app.store.close()
