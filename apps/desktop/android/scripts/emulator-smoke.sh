@@ -36,8 +36,18 @@ adb shell am force-stop "$PKG" || true
 
 # Diagnóstico visível no próprio log do passo (os artefatos exigem login para baixar).
 diagnose() {
-  echo "--- logcat (URE, Python, WebView, erros) ---"
-  grep -iE "URE|chaquo|python|webview|chromium|FATAL|Exception|Error" "$OUT/logcat.txt" | tail -120 || true
+  pid="$(adb shell pidof "$PKG" 2>/dev/null | tr -d '\r' || true)"
+  echo "--- processo: pid='${pid:-ausente}' ---"
+  echo "--- atividade (dumpsys) ---"
+  adb shell dumpsys activity activities 2>/dev/null | grep -iE "dev.ure|mResumedActivity|topResumed" | head -12 || true
+  echo "--- buffer de crash ---"
+  adb logcat -b crash -d 2>/dev/null | tail -60 || true
+  if [ -n "${pid:-}" ]; then
+    echo "--- logcat do processo $pid ---"
+    grep -E " ${pid} " "$OUT/logcat.txt" | tail -200 || true
+  fi
+  echo "--- logcat (URE, Tauri/Wry, Python, WebView, erros) ---"
+  grep -iE "URE|tauri|wry|chaquo|python|webview|chromium|FATAL|Exception|AndroidRuntime" "$OUT/logcat.txt" | tail -120 || true
   echo "--- textos visíveis na tela ---"
   if [ -f "$OUT/ui.xml" ]; then grep -o 'text="[^"]*"' "$OUT/ui.xml" | sort -u | head -60 || true; fi
 }
