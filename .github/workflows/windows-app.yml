@@ -93,7 +93,7 @@ jobs:
       # O instalador leva o próprio Python: o build não usa o Python do runner.
       - name: Preparar runtime Python embutido (python.org, sha256 verificado)
         working-directory: apps/desktop
-        run: pwsh scripts/fetch-python.ps1 -AcceptNewHash
+        run: pwsh scripts/fetch-python.ps1
 
       - name: Toolchain Rust (MSVC)
         uses: dtolnay/rust-toolchain@stable
