@@ -14,10 +14,15 @@ adb wait-for-device
 until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; do sleep 2; done
 adb install -r "$APK"
 adb logcat -c
+adb logcat -v threadtime > "$OUT/logcat-live.txt" 2>&1 &
+LOGCAT_PID=$!
 adb shell am start -n "$PKG/.MainActivity"
+seen_pid=""
 
 online=0
 for _ in $(seq 1 75); do
+  p="$(adb shell pidof "$PKG" 2>/dev/null | tr -d '\r' || true)"
+  if [ -n "$p" ]; then seen_pid="$p"; fi
   adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 || true
   adb pull /sdcard/ui.xml "$OUT/ui.xml" >/dev/null 2>&1 || true
   if [ -f "$OUT/ui.xml" ] && grep -q "Não foi possível iniciar" "$OUT/ui.xml"; then
@@ -31,25 +36,21 @@ for _ in $(seq 1 75); do
 done
 
 adb exec-out screencap -p > "$OUT/screen.png" || true
-adb logcat -d > "$OUT/logcat.txt" || true
+kill "$LOGCAT_PID" 2>/dev/null || true
+cp "$OUT/logcat-live.txt" "$OUT/logcat.txt" 2>/dev/null || true
 adb shell am force-stop "$PKG" || true
 
 # Diagnóstico visível no próprio log do passo (os artefatos exigem login para baixar).
 diagnose() {
-  pid="$(adb shell pidof "$PKG" 2>/dev/null | tr -d '\r' || true)"
-  echo "--- processo: pid='${pid:-ausente}' ---"
-  echo "--- atividade (dumpsys) ---"
-  adb shell dumpsys activity activities 2>/dev/null | grep -iE "dev.ure|mResumedActivity|topResumed" | head -12 || true
-  echo "--- buffer de crash ---"
-  adb logcat -b crash -d 2>/dev/null | tail -60 || true
-  if [ -n "${pid:-}" ]; then
-    echo "--- logcat do processo $pid ---"
-    grep -E " ${pid} " "$OUT/logcat.txt" | tail -200 || true
+  echo "--- PID visto durante o teste: ${seen_pid:-nenhum} ---"
+  echo "--- término, sinais nativos, memória e erros do app ---"
+  grep -iE "dev\.ure|ure_desktop|Fatal signal|tombstone|panicked|RustStdout|died|lowmemory|Killing|am_proc|am_kill|am_crash|ActivityManager|AndroidRuntime|FATAL|DEBUG *:" "$OUT/logcat.txt" | grep -viE "AiAiEcho|nativeloader|GestureNavBar|NGA disabled" | tail -200 || true
+  if [ -n "${seen_pid:-}" ]; then
+    echo "--- linhas do processo $seen_pid ---"
+    grep " ${seen_pid} " "$OUT/logcat.txt" | grep -viE "AiAiEcho|nativeloader|GestureNavBar|NGA disabled" | tail -250 || true
   fi
-  echo "--- logcat (URE, Tauri/Wry, Python, WebView, erros) ---"
-  grep -iE "URE|tauri|wry|chaquo|python|webview|chromium|FATAL|Exception|AndroidRuntime" "$OUT/logcat.txt" | tail -120 || true
-  echo "--- textos visíveis na tela ---"
-  if [ -f "$OUT/ui.xml" ]; then grep -o 'text="[^"]*"' "$OUT/ui.xml" | sort -u | head -60 || true; fi
+  echo "--- crash buffer ---"
+  adb logcat -b crash -d 2>/dev/null | tail -60 || true
 }
 
 if grep -q "FATAL EXCEPTION" "$OUT/logcat.txt"; then
