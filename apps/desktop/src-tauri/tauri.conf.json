@@ -28,8 +28,7 @@
     ],
     "resources": {
       "../../backend/ure": "backend/ure",
-      "../../web": "backend/ure/web",
-      "python": "python"
+      "../../web": "backend/ure/web"
     },
     "windows": {
       "webviewInstallMode": {

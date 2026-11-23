@@ -1,0 +1,57 @@
+// Python embutido (Chaquopy) e interface web do URE no APK.
+//
+// O backend (apps/backend/ure) e o módulo de entrada (apps/desktop/android/python) são copiados
+// para build/ure-python antes do empacotamento. A interface (apps/web) vai para os assets em
+// build/ure-assets/ure-web. Nada é copiado para src/ e o repositório não é modificado.
+// Versões: Chaquopy 17.0.0 com AGP 9.0.x e Gradle 9.1.0 (ver docs/ANDROID.md).
+
+apply plugin: 'com.chaquo.python'
+
+def appsDir = rootProject.projectDir.parentFile.parentFile.parentFile.parentFile
+
+android {
+    defaultConfig {
+        python {
+            version "3.12"
+            buildPython "python3"
+        }
+    }
+    sourceSets {
+        main {
+            python.srcDirs = [file("build/ure-python").absolutePath]
+            assets.srcDirs += [file("build/ure-assets").absolutePath]
+        }
+    }
+}
+
+tasks.register("stageUrePython", Copy) {
+    from(new File(appsDir, "backend/ure")) {
+        into "ure"
+        exclude "**/__pycache__/**", "**/*.pyc"
+    }
+    from(new File(appsDir, "desktop/android/python")) {
+        include "ure_android.py"
+    }
+    into file("build/ure-python")
+}
+
+tasks.register("stageUreWeb", Copy) {
+    from(new File(appsDir, "web")) {
+        into "ure-web"
+        exclude "test/**", "package.json"
+    }
+    into file("build/ure-assets")
+}
+
+afterEvaluate {
+    tasks.configureEach { t ->
+        if (t.name.startsWith("stage")) return
+        def n = t.name.toLowerCase()
+        if (n.contains("python") || n.contains("chaquopy")) {
+            t.dependsOn "stageUrePython"
+        }
+        if (n.startsWith("merge") && n.endsWith("assets")) {
+            t.dependsOn "stageUreWeb"
+        }
+    }
+}

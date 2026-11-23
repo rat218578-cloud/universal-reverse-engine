@@ -7,6 +7,10 @@ edition = "2021"
 description = "Universal Reverse Engine — aplicativo desktop"
 license = "MIT"
 
+[lib]
+name = "ure_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
