@@ -24,6 +24,17 @@ android {
     }
 }
 
+// O Chaquopy 17 (Python 3.12) só suporta arm64-v8a e x86_64. O plugin do Tauri cria também as
+// variantes de 32 bits e x86 (armDebug, x86Debug); elas são desabilitadas porque o build só
+// compila arm64 e x86_64 (ver --target em docs/ANDROID.md).
+androidComponents {
+    beforeVariants { builder ->
+        def n = builder.name
+        if (n.startsWith("arm") && !n.startsWith("arm64")) builder.enable = false
+        if (n.startsWith("x86") && !n.startsWith("x86_64")) builder.enable = false
+    }
+}
+
 tasks.register("stageUrePython", Copy) {
     from(new File(appsDir, "backend/ure")) {
         into "ure"
