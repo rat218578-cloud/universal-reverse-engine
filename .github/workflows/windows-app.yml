@@ -8,6 +8,7 @@ on:
   push:
     branches:
       - feature/windows-desktop
+      - feature/android-apk  # o lançador desktop é compartilhado com o Android
     paths:
       - "apps/**"
       - ".github/workflows/windows-app.yml"

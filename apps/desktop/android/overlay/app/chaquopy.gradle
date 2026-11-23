@@ -3,7 +3,7 @@
 // O backend (apps/backend/ure) e o módulo de entrada (apps/desktop/android/python) são copiados
 // para build/ure-python antes do empacotamento. A interface (apps/web) vai para os assets em
 // build/ure-assets/ure-web. Nada é copiado para src/ e o repositório não é modificado.
-// Versões: Chaquopy 17.0.0 com AGP 9.0.x e Gradle 9.1.0 (ver docs/ANDROID.md).
+// Versões: Chaquopy 17.0.0 (documentado para AGP 9.0.x). O toolchain Gradle/AGP é o do template Tauri (ver docs/ANDROID.md).
 
 apply plugin: 'com.chaquo.python'
 
