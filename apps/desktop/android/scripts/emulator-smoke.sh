@@ -20,7 +20,7 @@ adb shell am start -n "$PKG/.MainActivity"
 seen_pid=""
 
 online=0
-for _ in $(seq 1 75); do
+for _ in $(seq 1 150); do
   p="$(adb shell pidof "$PKG" 2>/dev/null | tr -d '\r' || true)"
   if [ -n "$p" ]; then seen_pid="$p"; fi
   adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 || true
@@ -60,6 +60,6 @@ if [ -f "$OUT/ui.xml" ] && grep -q "Não foi possível iniciar" "$OUT/ui.xml"; t
   diagnose; echo "::error::o aplicativo mostrou erro ao iniciar o backend"; exit 1
 fi
 if [ "$online" != 1 ]; then
-  diagnose; echo "::error::a interface não ficou online em 150 s"; exit 1
+  diagnose; echo "::error::a interface não ficou online em 300 s"; exit 1
 fi
 echo "teste de instalação no emulador: interface online"

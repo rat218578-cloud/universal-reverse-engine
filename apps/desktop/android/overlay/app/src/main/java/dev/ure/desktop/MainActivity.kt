@@ -48,6 +48,7 @@ class MainActivity : TauriActivity() {
 
   override fun onWebViewCreate(webView: WebView) {
     super.onWebViewCreate(webView)
+    Log.i(TAG, "onWebViewCreate")
     pendingWebView = webView
     session?.let { ready ->
       mainHandler.post { attach(webView, ready) }
@@ -67,13 +68,17 @@ class MainActivity : TauriActivity() {
 
   private fun startBackend() {
     try {
+      Log.i(TAG, "iniciando backend")
       val port = freePort()
       val token = newToken()
       val dataDir = File(filesDir, "ure-data").apply { mkdirs() }
       val webDir = prepareWebAssets()
+      Log.i(TAG, "interface em ${webDir.absolutePath}")
       if (!Python.isStarted()) Python.start(AndroidPlatform(this))
+      Log.i(TAG, "python iniciado")
       val module = Python.getInstance().getModule("ure_android")
       val actualPort = module.callAttr("start", dataDir.absolutePath, webDir.absolutePath, port, token).toInt()
+      Log.i(TAG, "servidor escutando em $actualPort")
       waitHealthy(actualPort)
       Log.i(TAG, "backend pronto em 127.0.0.1:$actualPort")
       val ready = Session(actualPort, token)
@@ -100,6 +105,7 @@ class MainActivity : TauriActivity() {
       setOf(origin),
     )
     webView.webViewClient = BackendOnlyClient(origin)
+    Log.i(TAG, "carregando $origin/")
     webView.loadUrl("$origin/")
   }
 
