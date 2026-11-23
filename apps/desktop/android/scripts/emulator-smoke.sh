@@ -34,13 +34,21 @@ adb exec-out screencap -p > "$OUT/screen.png" || true
 adb logcat -d > "$OUT/logcat.txt" || true
 adb shell am force-stop "$PKG" || true
 
+# Diagnóstico visível no próprio log do passo (os artefatos exigem login para baixar).
+diagnose() {
+  echo "--- logcat (URE, Python, WebView, erros) ---"
+  grep -iE "URE|chaquo|python|webview|chromium|FATAL|Exception|Error" "$OUT/logcat.txt" | tail -120 || true
+  echo "--- textos visíveis na tela ---"
+  if [ -f "$OUT/ui.xml" ]; then grep -o 'text="[^"]*"' "$OUT/ui.xml" | sort -u | head -60 || true; fi
+}
+
 if grep -q "FATAL EXCEPTION" "$OUT/logcat.txt"; then
-  echo "::error::o aplicativo travou (ver logcat.txt)"; exit 1
+  diagnose; echo "::error::o aplicativo travou"; exit 1
 fi
 if [ -f "$OUT/ui.xml" ] && grep -q "Não foi possível iniciar" "$OUT/ui.xml"; then
-  echo "::error::o aplicativo mostrou erro ao iniciar o backend (ver ui.xml)"; exit 1
+  diagnose; echo "::error::o aplicativo mostrou erro ao iniciar o backend"; exit 1
 fi
 if [ "$online" != 1 ]; then
-  echo "::error::a interface não ficou online em 150 s (ver screen.png e logcat.txt)"; exit 1
+  diagnose; echo "::error::a interface não ficou online em 150 s"; exit 1
 fi
 echo "teste de instalação no emulador: interface online"
