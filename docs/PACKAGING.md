@@ -69,8 +69,8 @@ O Python do Windows **não** pode ser copiado para o APK: o runtime do Windows �
 **Recomendação:** A para a análise local (o caminho que funciona sem servidor) e C como caminho
 opcional para os motores que exigem JVM ou .NET desktop. B não é recomendada agora.
 
-**Estado:** a implementação Android não foi iniciada nesta etapa. Esta seção é a avaliação
-pedida; a implementação fica para a próxima etapa, e nenhum APK foi gerado nesta rodada.
+**Estado:** implementada no branch `feature/android-apk` com a opção A (Chaquopy). APK de depuração
+gerado e testado no emulador pela CI. Detalhes, versões e pendências em `docs/ANDROID.md`.
 
 ### Matriz de recursos (baseada no código auditado)
 
@@ -100,6 +100,7 @@ um servidor. Nenhum resultado é simulado.
 
 - Windows: instalação sem Python, pip, Docker, Ollama ou ferramentas de desenvolvimento — **coberto
   por automação no runner** (ver seção 2, com o limite declarado).
-- Android: **não aprovado nesta etapa** (avaliação concluída; implementação pendente).
+- Android: APK de depuração gerado pela CI e instalação/abertura testadas no emulador x86_64. Aparelho
+  real e análise de APK dentro do app ainda pendentes (ver `docs/ANDROID.md`).
 - Web e Windows existentes: a regressão do backend roda no workflow `windows-app.yml` (Windows) e na
   CI (Linux). Os resultados exatos estão nos logs das execuções, não neste documento.
