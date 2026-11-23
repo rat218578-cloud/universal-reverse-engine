@@ -152,6 +152,10 @@ jobs:
           if (-not $msiExe) { throw "MSI não contém ure-desktop.exe" }
           if (-not $msiServer) { throw "MSI não contém o backend (server.py)" }
           if (-not $msiWeb) { throw "MSI não contém a interface (index.html)" }
+          $msiPy = Get-ChildItem $extract -Recurse -Filter "python.exe" | Where-Object { $_.FullName -like "*\python\python.exe" } | Select-Object -First 1
+          if (-not $msiPy) { throw "MSI não contém o runtime Python embutido (python\python.exe)" }
+          $msiPth = Get-ChildItem (Split-Path $msiPy.FullName) -Filter "python*._pth" | Select-Object -First 1
+          if (-not $msiPth -or -not (Select-String -Path $msiPth.FullName -Pattern "^\.\.\\backend$" -Quiet)) { throw "runtime do MSI sem caminho para o backend no ._pth" }
           Write-Host "MSI contém ure-desktop.exe, backend e interface."
 
       - name: Teste de instalação NSIS (instalar, abrir, analisar, encerrar, desinstalar)

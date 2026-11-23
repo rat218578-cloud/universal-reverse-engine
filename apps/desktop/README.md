@@ -10,7 +10,7 @@ JADX/apktool/ILSpy/Ghidra (quando instalados) e exportação. O aplicativo não 
 
 ## Como funciona
 
-1. O lançador (`src-tauri/src/main.rs`) escolhe um Python 3.11+, uma porta livre no loopback e gera um
+1. O lançador (`src-tauri/src/main.rs`) usa o runtime Python 3.12 embutido no instalador, uma porta livre no loopback e gera um
    **token novo a cada execução** (32 bytes aleatórios).
 2. Inicia `python -m ure.server` com `URE_TOKEN`, `URE_DATA_DIR` e `URE_PORT`. Os dados ficam em
    `%APPDATA%\dev.ure.desktop\data` (projetos, arquivos, relatórios).
@@ -41,11 +41,11 @@ padrão (`URE_AI_ENABLED=0`).
 
 | Item | Versão | Observação |
 |---|---|---|
-| Windows | 10 (1809+) ou 11 | WebView2 é instalado pelo instalador se faltar |
+| Windows | 10 (1809+) ou 11 | WebView2 é embutido no instalador (não há download na instalação) |
 | Rust | stable (testado com 1.97.0) | `rustup` com alvo `x86_64-pc-windows-msvc` |
 | Visual Studio Build Tools | 2022, carga "Desenvolvimento para desktop com C++" | exigido pelo Tauri no Windows |
 | Node.js | 18+ | só se for usar a CLI do Tauri via npm |
-| Python | 3.11+ | só para execução a partir do código-fonte |
+| Python | — | **não é necessário no computador do usuário.** O instalador traz o runtime Python 3.12 embutido. Para compilar, `scripts\fetch-python.ps1` baixa esse runtime |
 | tauri-cli | 2.x | `cargo install tauri-cli --version "^2" --locked` |
 
 ## Executar a partir do código-fonte (Windows)
@@ -71,20 +71,22 @@ cargo tauri build --bundles nsis,msi
 Saída: `target\release\bundle\nsis\*.exe` e `target\release\bundle\msi\*.msi`.
 
 O bundle copia `apps\backend\ure` para `backend\ure` e a interface para `backend\ure\web` (ver
-`tauri.conf.json > bundle.resources`). **O instalador ainda exige Python 3.11+ instalado no computador**,
-a menos que você inclua um Python embutível (ver abaixo).
+`tauri.conf.json > bundle.resources`), incluindo o runtime Python embutido em `python\`.
+Nenhuma instalação de Python é necessária no computador do usuário.
 
-### Incluir Python embutível (instalador sem Python)
+### Runtime Python embutido (já incluído)
 
-1. Baixe o *Windows embeddable package* do Python 3.11+ (x64) em python.org.
-2. Extraia em `apps\desktop\src-tauri\python\` (deve existir `python\python.exe`).
-3. Em `tauri.conf.json`, adicione ao `bundle.resources`: `"python": "python"`.
-4. No arquivo `python3XX._pth` extraído, descomente `import site` e adicione a linha `..\backend`,
-   para que o pacote `ure` seja encontrado a partir da pasta do Python.
-5. Gere o instalador normalmente.
+O instalador inclui Python 3.12.10 (*embeddable package* oficial, `python-3.12.10-embed-amd64.zip`),
+verificado por SHA-256 em `python-runtime.json`. O backend não tem dependências de terceiros, então
+nenhum `pip` é necessário.
 
-Este passo **não foi testado**. Confirme que `python.exe -m ure.server` sobe a partir da pasta
-`backend` instalada antes de distribuir.
+```powershell
+pwsh apps\desktop\scripts\fetch-python.ps1     # baixa, verifica o sha256 e prepara src-tauri\python\
+```
+
+O arquivo `python312._pth` gerado aponta para `..\backend`, então o runtime encontra o pacote `ure`
+instalado em `$INSTDIR\backend`. O launcher usa **somente** esse runtime em release: se ele não existir
+ou não funcionar, o app mostra uma mensagem e não cai para outro Python.
 
 ## Estado da verificação
 
@@ -102,7 +104,7 @@ Este passo **não foi testado**. Confirme que `python.exe -m ure.server` sobe a 
 | Instalador MSI (`.msi`) | Gerado; conteúdo conferido por extração administrativa (não instalado) |
 | Teste de instalação Windows (`apps/desktop/scripts/smoke-windows.ps1`) | Passou: instalação, abertura, saúde do backend, janela, encerramento gracioso, morte forçada, análise de APK/EXE/DLL pelo backend instalado, persistência de projeto após reinício, desinstalação |
 | WebView2 em Windows | Presente no runner; não testado em máquina do usuário |
-| Python | **Não incluído no instalador**: o computador de destino precisa de Python 3.11+ (ver seção abaixo) |
+| Python no computador do usuário | Não é necessário. O teste remove Python do PATH e confirma que o backend roda do runtime instalado |
 | Ícones | Provisórios, gerados por script (`icons/`). Substitua pela marca oficial antes de distribuir |
 
 ## Limitações conhecidas
