@@ -1,0 +1,6 @@
+{
+  "_comment": "Runtime Python embutível incluído no instalador Windows. sha256 vazio = primeira obtenção: o script exige -AcceptNewHash e imprime o valor, que deve ser conferido e fixado aqui antes de publicar.",
+  "version": "3.12.10",
+  "url": "https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip",
+  "sha256": ""
+}

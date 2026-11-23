@@ -96,7 +96,13 @@ fn launch(handle: &AppHandle) -> Result<(u16, String), String> {
             r.join("python").join("bin").join("python3")
         }
     });
-    let python = backend::choose_python(std::env::var("URE_PYTHON").ok(), bundled_python, backend::python_is_supported)?;
+    // Sistema só em desenvolvimento: o instalador sempre traz o runtime.
+    let python = backend::choose_python(
+        std::env::var("URE_PYTHON").ok(),
+        bundled_python,
+        cfg!(debug_assertions),
+        backend::python_is_supported,
+    )?;
 
     let port = backend::free_port()?;
     let token = backend::new_token()?;

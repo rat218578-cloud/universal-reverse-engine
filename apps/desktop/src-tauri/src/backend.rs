@@ -92,22 +92,39 @@ pub fn injection_script(token: &str) -> Result<String, String> {
     Ok(format!("window.URE_DESKTOP = {{ token: \"{token}\" }};"))
 }
 
-/// Escolhe o Python: `URE_PYTHON`, depois o Python empacotado, depois o do sistema.
-/// `candidate_ok` testa um candidato (em produção, executa a versão e compara).
+/// Escolhe o interpretador do backend.
+///
+/// Ordem: `URE_PYTHON` (override explícito, sem fallback), o runtime empacotado no instalador
+/// (se existir, é o único usado: falha não cai para outro Python), e só então o Python do
+/// sistema, e apenas quando `allow_system` for verdadeiro (builds de desenvolvimento).
+/// Em release o usuário nunca precisa ter Python instalado.
 pub fn choose_python(
     override_program: Option<String>,
     bundled: Option<PathBuf>,
+    allow_system: bool,
     candidate_ok: impl Fn(&Python) -> bool,
 ) -> Result<Python, String> {
     if let Some(program) = override_program.filter(|p| !p.trim().is_empty()) {
         let py = Python { program, prefix: vec![] };
-        return if candidate_ok(&py) { Ok(py) } else { Err(format!("URE_PYTHON não aponta para Python >= {}.{}", MIN_PYTHON.0, MIN_PYTHON.1)) };
+        return if candidate_ok(&py) {
+            Ok(py)
+        } else {
+            Err(format!("URE_PYTHON não aponta para Python >= {}.{}", MIN_PYTHON.0, MIN_PYTHON.1))
+        };
     }
-    if let Some(path) = bundled.filter(|p| p.is_file()) {
+    if let Some(path) = bundled.as_ref().filter(|p| p.is_file()) {
         let py = Python { program: path.to_string_lossy().into_owned(), prefix: vec![] };
-        if candidate_ok(&py) {
-            return Ok(py);
-        }
+        return if candidate_ok(&py) {
+            Ok(py)
+        } else {
+            Err(format!(
+                "o runtime Python do aplicativo ({}) não funciona. Reinstale o URE.",
+                path.display()
+            ))
+        };
+    }
+    if !allow_system {
+        return Err("o runtime Python não foi incluído neste instalador. Reinstale o URE.".into());
     }
     for py in system_candidates() {
         if candidate_ok(&py) {
@@ -115,7 +132,7 @@ pub fn choose_python(
         }
     }
     Err(format!(
-        "Python {}.{} ou superior não foi encontrado. Instale o Python ou defina URE_PYTHON.",
+        "Python {}.{} ou superior não foi encontrado. Defina URE_PYTHON (somente desenvolvimento).",
         MIN_PYTHON.0, MIN_PYTHON.1
     ))
 }
@@ -324,13 +341,13 @@ mod tests {
 
     #[test]
     fn python_override_wins_when_supported() {
-        let chosen = choose_python(Some("/opt/py".into()), None, |_| true).unwrap();
+        let chosen = choose_python(Some("/opt/py".into()), None, false, |_| true).unwrap();
         assert_eq!(chosen.program, "/opt/py");
     }
 
     #[test]
     fn unsupported_override_is_an_error_not_a_fallback() {
-        let err = choose_python(Some("/opt/py2".into()), None, |_| false).unwrap_err();
+        let err = choose_python(Some("/opt/py2".into()), None, false, |_| false).unwrap_err();
         assert!(err.contains("URE_PYTHON"));
     }
 
@@ -340,14 +357,38 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let bundled = dir.join("python.exe");
         File::create(&bundled).unwrap();
-        let chosen = choose_python(None, Some(bundled.clone()), |_| true).unwrap();
+        let chosen = choose_python(None, Some(bundled.clone()), false, |_| true).unwrap();
         assert_eq!(chosen.program, bundled.to_string_lossy());
         let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
+    fn broken_bundled_runtime_is_an_error_not_a_system_fallback() {
+        let dir = std::env::temp_dir().join(format!("ure-test-broken-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let bundled = dir.join("python.exe");
+        File::create(&bundled).unwrap();
+        // allow_system = true: mesmo assim o runtime empacotado tem prioridade absoluta
+        let err = choose_python(None, Some(bundled.clone()), true, |p| p.program != bundled.to_string_lossy()).unwrap_err();
+        assert!(err.contains("Reinstale"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn release_without_bundled_runtime_never_uses_system_python() {
+        let err = choose_python(None, None, false, |_| true).unwrap_err();
+        assert!(err.contains("Reinstale"));
+    }
+
+    #[test]
+    fn development_may_use_system_python_when_no_bundle() {
+        let chosen = choose_python(None, None, true, |p| p.program == "python3").unwrap();
+        assert_eq!(chosen.program, "python3");
+    }
+
+    #[test]
     fn missing_python_reports_how_to_fix() {
-        let err = choose_python(None, None, |_| false).unwrap_err();
+        let err = choose_python(None, None, true, |_| false).unwrap_err();
         assert!(err.contains("URE_PYTHON"));
     }
 }

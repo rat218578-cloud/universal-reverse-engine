@@ -41,6 +41,15 @@ function Port-Open([int]$port) {
 }
 
 New-Item -ItemType Directory -Force -Path $Work | Out-Null
+
+# Ambiente limpo de Python: o aplicativo deve funcionar sem Python instalado no computador.
+# Remove do PATH qualquer diretório de Python e as variáveis que influenciam o interpretador.
+$cleanPath = ($env:PATH -split ";" | Where-Object { $_ -and ($_ -notmatch "(?i)python|setup-python|hostedtoolcache\\python") }) -join ";"
+$env:PATH = $cleanPath
+foreach ($v in @("URE_PYTHON", "PYTHONHOME", "PYTHONPATH", "PYTHONSTARTUP")) { Remove-Item "env:$v" -ErrorAction SilentlyContinue }
+$pythonVisible = [bool](Get-Command python -ErrorAction SilentlyContinue)
+if ($pythonVisible) { throw "não foi possível remover Python do PATH deste teste" }
+
 Start-Transcript -Path (Join-Path $Work "smoke-transcript.txt") -Force | Out-Null
 # Qualquer erro vira anotação com a linha, e os resultados parciais são gravados.
 trap {
@@ -58,6 +67,12 @@ if ($code -ne 0) { throw "instalador NSIS terminou com código $code" }
 $exe = Join-Path $install "ure-desktop.exe"
 Wait-Until { Test-Path $exe } 60 "instalação do NSIS"
 Record "nsis_installed" $exe
+Record "python_on_path_during_test" $pythonVisible
+$bundledPy = Join-Path $install "python\python.exe"
+Wait-Until { Test-Path $bundledPy } 10 "runtime Python instalado"
+Record "bundled_python_installed" $bundledPy
+# Os passos seguintes usam somente o runtime instalado.
+$Python = $bundledPy
 Wait-Until { Test-Path (Join-Path $install "backend\ure\server.py") } 10 "backend instalado"
 Wait-Until { Test-Path (Join-Path $install "backend\ure\web\index.html") } 10 "interface instalada"
 Record "backend_package_installed" $true
@@ -76,6 +91,12 @@ Wait-Until { $null -ne (Current-Port) } 90 "backend anunciar a porta"
 $port = Current-Port
 Wait-Until { Port-Open $port } 90 "saúde do backend"
 Record "backend_health_port" $port
+# O processo do backend deve ser o runtime instalado, não um Python do sistema.
+$backendProc = Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -like "*ure.server*" } | Select-Object -First 1
+if (-not $backendProc) { throw "processo do backend não encontrado" }
+if ($backendProc.ExecutablePath -notlike "$install\python\*") { throw "backend usa outro Python: $($backendProc.ExecutablePath)" }
+Record "backend_runs_bundled_python" $backendProc.ExecutablePath
 Wait-Until { $app.HasExited -eq $false -and $app.MainWindowTitle -eq "Universal Reverse Engine" } 90 "janela principal"
 Record "window_opened" $app.MainWindowTitle
 $webview = @(Get-Process -Name "msedgewebview2" -ErrorAction SilentlyContinue).Count

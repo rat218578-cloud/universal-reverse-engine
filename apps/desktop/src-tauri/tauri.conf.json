@@ -28,11 +28,12 @@
     ],
     "resources": {
       "../../backend/ure": "backend/ure",
-      "../../web": "backend/ure/web"
+      "../../web": "backend/ure/web",
+      "python": "python"
     },
     "windows": {
       "webviewInstallMode": {
-        "type": "downloadBootstrapper"
+        "type": "embedBootstrapper"
       }
     }
   }
