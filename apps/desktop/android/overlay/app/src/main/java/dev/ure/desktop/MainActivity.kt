@@ -75,6 +75,7 @@ class MainActivity : TauriActivity() {
       val module = Python.getInstance().getModule("ure_android")
       val actualPort = module.callAttr("start", dataDir.absolutePath, webDir.absolutePath, port, token).toInt()
       waitHealthy(actualPort)
+      Log.i(TAG, "backend pronto em 127.0.0.1:$actualPort")
       val ready = Session(actualPort, token)
       session = ready
       mainHandler.post { pendingWebView?.let { attach(it, ready) } }

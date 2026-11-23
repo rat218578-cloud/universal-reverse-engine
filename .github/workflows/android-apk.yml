@@ -102,6 +102,32 @@ jobs:
           sha256sum "$RUNNER_TEMP/out/universal-reverse-engine-debug.apk" | tee "$RUNNER_TEMP/out/SHA256SUMS.txt"
           ls -l "$RUNNER_TEMP/out"
 
+      - name: Habilitar KVM (aceleração do emulador)
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Teste de instalação no emulador x86_64
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: bash apps/desktop/android/scripts/emulator-smoke.sh "${{ runner.temp }}/out/universal-reverse-engine-debug.apk" "${{ runner.temp }}/emulator"
+
+      - name: Artifact — evidências do teste no emulador
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: universal-reverse-engine-emulator-smoke
+          path: ${{ runner.temp }}/emulator/*
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Artifact — APK de depuração
         uses: actions/upload-artifact@v4
         with:
