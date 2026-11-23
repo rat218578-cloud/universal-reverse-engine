@@ -98,7 +98,11 @@ if (-not $backendProc) { throw "processo do backend não encontrado" }
 if ($backendProc.ExecutablePath -notlike "$install\python\*") { throw "backend usa outro Python: $($backendProc.ExecutablePath)" }
 Record "backend_runs_bundled_python" $backendProc.ExecutablePath
 try {
-    Wait-Until { $app.HasExited -eq $false -and $app.MainWindowTitle -eq "Universal Reverse Engine" } 90 "janela principal"
+    # MainWindowTitle é cacheado no objeto Process: consulta o processo de novo a cada verificação.
+    Wait-Until {
+        $live = Get-Process -Id $app.Id -ErrorAction SilentlyContinue
+        $null -ne $live -and $live.MainWindowTitle -eq "Universal Reverse Engine"
+    } 90 "janela principal"
 } catch {
     # Diagnóstico: o que existe de fato na sessão quando a janela não é encontrada.
     Write-Host "DIAG app.HasExited=$($app.HasExited) app.MainWindowTitle='$($app.MainWindowTitle)' app.MainWindowHandle=$($app.MainWindowHandle)"
@@ -107,7 +111,7 @@ try {
     if (Test-Path $log) { Write-Host "DIAG backend.log (cauda):"; Get-Content $log -Tail 30 | ForEach-Object { Write-Host "  $_" } }
     throw
 }
-Record "window_opened" $app.MainWindowTitle
+Record "window_opened" (Get-Process -Id $app.Id).MainWindowTitle
 $webview = @(Get-Process -Name "msedgewebview2" -ErrorAction SilentlyContinue).Count
 Record "webview2_processes" $webview
 
