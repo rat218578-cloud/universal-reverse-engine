@@ -14,7 +14,7 @@ jobs:
         env:
           URE_TOOLS_HOME: ${{ runner.temp }}/ure-tools
           URE_SKIP_DOTNET: "1"
-        run: sudo -E bash scripts/install-tools.sh
+        run: sudo env URE_TOOLS_HOME="$URE_TOOLS_HOME" URE_SKIP_DOTNET="$URE_SKIP_DOTNET" bash scripts/install-tools.sh
       - name: Diagnóstico das ferramentas
         env:
           URE_TOOLS_ENV: ${{ runner.temp }}/ure-tools/tools.env
