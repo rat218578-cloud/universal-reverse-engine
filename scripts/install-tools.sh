@@ -52,6 +52,17 @@ if [ "${URE_SKIP_APT:-0}" != "1" ]; then
   fi
 fi
 
+# Java 17 é o runtime verificado do Apktool 2.7.0. Outras JVMs instaladas como dependência
+# (ex.: OpenJDK 25 no Ubuntu 26.04) passam a não ser o padrão.
+JAVA17_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+if [ -x "$JAVA17_HOME/bin/java" ]; then
+  for tool in java javac; do
+    [ -x "$JAVA17_HOME/bin/$tool" ] && update-alternatives --set "$tool" "$JAVA17_HOME/bin/$tool" >/dev/null 2>&1 || true
+  done
+  export JAVA_HOME="$JAVA17_HOME"
+  log "java padrão: $JAVA17_HOME/bin/java"
+fi
+
 # ---- 2. LIEF em ambiente próprio -------------------------------------------------------------
 VENV="$TOOLS_HOME/venv"
 if [ ! -x "$VENV/bin/python" ]; then
@@ -120,7 +131,9 @@ fi
 {
   echo "# Gerado por scripts/install-tools.sh em $(date -u +%Y-%m-%dT%H:%M:%SZ). Não editar à mão."
   echo "URE_LIEF_PYTHON=$VENV/bin/python"
-  for pair in "URE_JAVA:$(command -v java || true)" "URE_DOTNET:$(command -v dotnet || true)" \
+  java_bin="$(command -v java || true)"
+  [ -x "$JAVA17_HOME/bin/java" ] && java_bin="$JAVA17_HOME/bin/java"
+  for pair in "URE_JAVA:$java_bin" "URE_DOTNET:$(command -v dotnet || true)" \
               "URE_APKTOOL:$(command -v apktool || true)"; do
     value="${pair#*:}"; [ -n "$value" ] && echo "${pair%%:*}=$value"
   done
