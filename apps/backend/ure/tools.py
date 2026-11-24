@@ -260,6 +260,10 @@ def run_tool(
     if limited:
         cmd = [sys.executable, "-c", _LIMIT_STUB, str(memory_mb * MB), *argv]
     env = child_env()
+    if limited:
+        # A JVM reserva heap e metaspace como memória virtual: sem um teto de heap menor que o
+        # limite de endereçamento, ela falha com "insufficient memory" (visto no CI Ubuntu).
+        env["JAVA_TOOL_OPTIONS"] = f"-Xmx{max(256, memory_mb // 2)}m"
     log.parent.mkdir(parents=True, exist_ok=True)
     kwargs: dict[str, Any] = {"stdin": subprocess.DEVNULL, "stdout": subprocess.PIPE}
     if stdout_file is not None:

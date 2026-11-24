@@ -2,6 +2,7 @@
 API de ferramentas e persistência após reinício do servidor."""
 from __future__ import annotations
 
+import io
 import os
 import shutil
 import tempfile
@@ -79,6 +80,34 @@ class ProbeTests(unittest.TestCase):
         lines = startup_lines(rows)
         self.assertEqual(lines[0], "[ferramentas] apktool: 2.7.0 em /usr/bin/apktool")
         self.assertEqual(lines[1], "[ferramentas] jadx: AUSENTE. não encontrado")
+
+
+class RunToolLimitsTests(unittest.TestCase):
+    def test_limited_run_caps_jvm_heap_below_address_space_limit(self) -> None:
+        from ure import tools as ure_tools
+
+        captured: dict = {}
+
+        class FakeProc:
+            returncode = 0
+
+            def __init__(self, cmd, **kwargs):
+                captured["env"] = kwargs["env"]
+                self.stdout = io.BytesIO(b"")
+                self.stderr = io.BytesIO(b"")
+
+            def wait(self, timeout=None):
+                return 0
+
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            with mock.patch.object(ure_tools.subprocess, "Popen", FakeProc):
+                ure_tools.run_tool(["/bin/true"], cwd=tmp, timeout_s=10, memory_mb=3072,
+                                   log=tmp / "x.log")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        if os.name == "posix":
+            self.assertEqual(captured["env"]["JAVA_TOOL_OPTIONS"], "-Xmx1536m")
 
 
 class ToolsEnvFileTests(unittest.TestCase):
