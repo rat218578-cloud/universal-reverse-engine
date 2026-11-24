@@ -17,6 +17,7 @@ import mimetypes
 import os
 import re
 import shutil
+import zipfile
 import sys
 import threading
 import time
@@ -349,8 +350,8 @@ def extract_artifact(a: App, h: Any, m: Any, q: dict[str, str]) -> tuple[int, An
             report = safe_extract_zip(src, out, max_entries=s.max_entries,
                                       max_total_bytes=s.max_extract_bytes, max_ratio=s.max_ratio,
                                       guard=Guard(s.job_timeout_s))
-        except (UnsafeArchiveError, ArchiveLimitError) as exc:
-            a.store.patch_artifact(art["id"], status="rejected", details_patch={"extraction": {"error": str(exc)}})
+        except (UnsafeArchiveError, ArchiveLimitError, zipfile.BadZipFile) as exc:
+            a.store.patch_artifact(art["id"], status="rejected", details_patch={"extraction": {"error": str(exc), "type": type(exc).__name__}})
             raise
         except TimeLimitExceeded as exc:
             raise ApiError(503, "tempo limite da extração excedido") from exc

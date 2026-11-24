@@ -10,6 +10,7 @@ import dataclasses
 import json
 import re
 import shutil
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,7 @@ from .identify import KIND_APK, KIND_JAR, KIND_PE, KIND_ZIP
 from .jobs import BusyError
 from .limits import Guard
 from .pe import parse_pe
-from .safezip import safe_extract_zip
+from .safezip import ArchiveLimitError, UnsafeArchiveError, inventory_zip, safe_extract_zip
 from .secrets import scan_secrets
 from .tools import probe_all
 
@@ -129,15 +130,41 @@ def _analyze_pe(root: Path, original: Path, s: Any, logs: Path, report: dict[str
 
 def _analyze_container(root: Path, original: Path, art: dict[str, Any], s: Any, logs: Path,
                        report: dict[str, Any], progress: Any, guard: Guard) -> None:
+    # Inventário do diretório central: não grava nada e continua disponível mesmo se a
+    # extração falhar. Duplicatas e nomes inseguros aparecem aqui antes de qualquer extração.
+    progress(0.05, "inventário do diretório central")
+    try:
+        report["inventory"] = inventory_zip(original, max_entries=s.max_entries)
+    except (zipfile.BadZipFile, ArchiveLimitError) as exc:
+        report["inventory"] = {"status": "failed", "error": type(exc).__name__, "reason": str(exc)}
+    inventory_ok = report.get("inventory", {}).get("status") != "failed"
+    for dup in (report.get("inventory") or {}).get("duplicates", []):
+        report["indicators"].append({"type": "archive", "value": f"nome repetido: {dup['name']}",
+                                     "note": f"ocorrências: {dup['occurrences']}; conteúdo: {dup['crc_and_size']}"})
+
     progress(0.08, "extração segura")
     extracted = root / "extracted"
     shutil.rmtree(extracted, ignore_errors=True)
-    rep = safe_extract_zip(
-        original, extracted,
-        max_entries=s.max_entries, max_total_bytes=s.max_extract_bytes, max_ratio=s.max_ratio, guard=guard,
-    )
-    report["extraction"] = dataclasses.asdict(rep)
-    names = sorted(p.relative_to(extracted).as_posix() for p in extracted.rglob("*") if p.is_file())
+    failure: Exception | None = None
+    try:
+        rep = safe_extract_zip(
+            original, extracted,
+            max_entries=s.max_entries, max_total_bytes=s.max_extract_bytes, max_ratio=s.max_ratio,
+            guard=guard, quarantine=root / "quarantine",
+        )
+        report["extraction"] = {"status": "ok", **dataclasses.asdict(rep)}
+        for dup in rep.duplicates:
+            if dup["status"] == "conflitante":
+                report["indicators"].append({"type": "archive", "value": f"conflito de conteúdo: {dup['name']}",
+                                             "note": "nenhuma versão foi usada; cópias em quarentena"})
+    except (UnsafeArchiveError, ArchiveLimitError, zipfile.BadZipFile) as exc:
+        failure = exc
+        report["extraction"] = {"status": "failed", "error": type(exc).__name__, "reason": str(exc)}
+
+    if failure is None:
+        names = sorted(p.relative_to(extracted).as_posix() for p in extracted.rglob("*") if p.is_file())
+    else:
+        names = (report.get("inventory") or {}).get("names", []) if inventory_ok else []
     natives = [n for n in names if n.startswith("lib/") and n.endswith(".so")]
     report["dependencies"] = {
         "dex_files": [n for n in names if DEX_TOP.fullmatch(n)],
@@ -147,18 +174,29 @@ def _analyze_container(root: Path, original: Path, art: dict[str, Any], s: Any, 
                             and n.rsplit(".", 1)[-1] in ("RSA", "DSA", "EC", "SF")],
         "embedded_jars": [n for n in names if n.endswith(".jar")],
         "has_android_manifest": "AndroidManifest.xml" in names,
+        "source": "extraido" if failure is None else ("inventario" if inventory_ok else "indisponivel"),
     }
     is_apk = art["kind"] == KIND_APK
+    # Decompiladores escrevem a partir do conteúdo do arquivo. Se a extração recusou entradas
+    # inseguras ou excedeu limites, eles não são executados; o motivo fica registrado.
+    blocked = (f"extração recusada ({type(failure).__name__}): decompilador não executado"
+               if failure is not None else None)
     progress(0.25, "apktool (decodificação)")
-    report["engines"]["apktool"] = (
-        apktool_decode(original, root / "decompiled" / "apktool", s, logs, guard) if is_apk
-        else _skipped("não é APK")
-    )
+    if blocked is not None:
+        report["engines"]["apktool"] = _skipped(blocked)
+    else:
+        report["engines"]["apktool"] = (
+            apktool_decode(original, root / "decompiled" / "apktool", s, logs, guard) if is_apk
+            else _skipped("não é APK")
+        )
     progress(0.5, "JADX (descompilação DEX)")
-    report["engines"]["jadx"] = (
-        jadx_decompile(original, root / "decompiled" / "jadx", s, logs, guard)
-        if is_apk and report["dependencies"]["dex_files"] else _skipped("sem DEX ou não é APK")
-    )
+    if blocked is not None:
+        report["engines"]["jadx"] = _skipped(blocked)
+    else:
+        report["engines"]["jadx"] = (
+            jadx_decompile(original, root / "decompiled" / "jadx", s, logs, guard)
+            if is_apk and report["dependencies"]["dex_files"] else _skipped("sem DEX ou não é APK")
+        )
     progress(0.75, "apkanalyzer (manifesto)")
     report["engines"]["apkanalyzer"] = (
         apkanalyzer_manifest(original, root / "reports" / "apkanalyzer-manifest.xml", s, logs, guard)

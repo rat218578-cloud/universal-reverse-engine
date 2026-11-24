@@ -125,13 +125,19 @@ class SafeZipTests(TmpCase):
         self.assertTrue(any("link simbólico" in s for s in report.skipped))
         self.assertTrue((out / "real.txt").is_file())
 
-    def test_duplicate_names_rejected(self) -> None:
+    def test_conflicting_case_variant_names_are_quarantined_not_overwritten(self) -> None:
+        # Contrato atual: conteúdo conflitante não escolhe versão e não sobrescreve nada.
         arc = self.tmp / "d.zip"
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", UserWarning)
             make_zip(arc, [("A.txt", b"1", None), ("a.txt", b"2", None)])
-        with self.assertRaises(UnsafeArchiveError):
-            safe_extract_zip(arc, self.tmp / "out", **self.LIMITS)
+        out = self.tmp / "out"
+        report = safe_extract_zip(arc, out, **self.LIMITS)
+        self.assertFalse((out / "A.txt").exists() or (out / "a.txt").exists())
+        self.assertEqual(report.duplicates[0]["status"], "conflitante")
+        self.assertEqual(len(report.duplicates[0]["quarantined"]), 2)
+        for rel in report.duplicates[0]["quarantined"]:
+            self.assertTrue((self.tmp / "quarantine" / rel).is_file())
 
     def test_entry_count_limit(self) -> None:
         arc = make_zip(self.tmp / "n.zip", [(f"f{i}.txt", b"x", None) for i in range(5)])
