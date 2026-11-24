@@ -374,18 +374,49 @@ async function aiCard(pid, aid, report) {
 }
 
 // ----- ferramentas -------------------------------------------------------
+// Estado vindo do servidor (sondagem real e teste de execução). Nada é exibido como disponível sem isso.
 async function toolsView() {
   const [{ tools }, ai] = await Promise.all([api("GET", "/api/v1/tools"), api("GET", "/api/v1/ai/status")]);
+  const pill = (ok, text) => h("span", { class: `pill ${ok ? "ok" : "warn"}` }, text);
+  const rowFor = (t) => {
+    const result = h("div", { class: "muted" });
+    const testBtn = h("button", {
+      class: "secondary",
+      onclick: async () => {
+        testBtn.disabled = true;
+        result.textContent = "executando o teste...";
+        try {
+          const r = await api("POST", `/api/v1/tools/${t.key}/test`, { body: {} });
+          result.replaceChildren(
+            pill(r.ok, r.ok ? "teste ok" : "teste falhou"),
+            h("div", { class: "mono" }, (r.detail || "").slice(0, 300) || "(sem saída)"),
+          );
+        } catch (err) {
+          result.textContent = `erro ao testar: ${err.message}`;
+        } finally {
+          testBtn.disabled = false;
+        }
+      },
+    }, "Testar");
+    const observation = t.status === "available"
+      ? (t.pending && t.pending.length ? `dependências ausentes: ${t.pending.join(", ")}` : (t.note || "pronta"))
+      : t.note;
+    return h("tr", {},
+      h("td", {}, t.name, h("div", { class: "muted" }, t.purpose)),
+      h("td", {}, pill(t.status === "available", t.status === "available" ? "disponível" : "ausente")),
+      h("td", {}, t.status === "available" ? t.version : "—"),
+      h("td", {}, h("span", { class: "mono" }, t.path || "—")),
+      h("td", { class: "muted" }, observation),
+      h("td", {}, t.status === "available" ? testBtn : h("span", { class: "muted" }, "indisponível"), result));
+  };
   show(
     h("h2", {}, "Ferramentas de engenharia reversa"),
-    h("p", { class: "muted" }, "Status real detectado no servidor. Ferramenta ausente aparece como ausente e não é simulada."),
+    h("p", { class: "muted" }, "Status real detectado no servidor. Ferramenta ausente aparece como ausente, com o motivo, e não é simulada."),
     h("div", { class: "card" }, h("table", {},
-      h("thead", {}, h("tr", {}, h("th", {}, "Motor"), h("th", {}, "Status"), h("th", {}, "Versão / observação"))),
-      h("tbody", {}, tools.map((t) => h("tr", {},
-        h("td", {}, t.name, h("div", { class: "muted" }, t.purpose)),
-        h("td", {}, h("span", { class: `pill ${t.status === "available" ? "ok" : "warn"}` }, t.status)),
-        h("td", { class: "muted" }, t.status === "available" ? t.version : t.note))))),
-    ),
+      h("thead", {}, h("tr", {},
+        h("th", {}, "Ferramenta"), h("th", {}, "Status"), h("th", {}, "Versão"),
+        h("th", {}, "Caminho"), h("th", {}, "Observação"), h("th", {}, "Teste de execução"))),
+      h("tbody", {}, tools.map(rowFor)))),
     h("div", { class: "card" }, h("h3", {}, "IA (opcional)"),
       h("p", {}, `Ligada: ${ai.enabled ? "sim" : "não"} · Ollama local: ${ai.ollama_reachable ? "alcançável" : "indisponível"} · Orçamento diário: ${ai.calls_today}/${ai.daily_budget}`),
       h("p", { class: "muted" }, "Provedores externos não estão implementados nesta versão e exigem consentimento explícito.")),
