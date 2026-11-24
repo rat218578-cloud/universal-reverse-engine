@@ -108,6 +108,7 @@ class RunToolLimitsTests(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
         if os.name == "posix":
             self.assertEqual(captured["env"]["JAVA_TOOL_OPTIONS"], "-Xmx1536m")
+            self.assertEqual(captured["env"]["MALLOC_ARENA_MAX"], "2")
 
 
 class ToolsEnvFileTests(unittest.TestCase):

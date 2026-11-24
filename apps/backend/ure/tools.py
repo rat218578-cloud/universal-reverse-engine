@@ -264,6 +264,9 @@ def run_tool(
         # A JVM reserva heap e metaspace como memória virtual: sem um teto de heap menor que o
         # limite de endereçamento, ela falha com "insufficient memory" (visto no CI Ubuntu).
         env["JAVA_TOOL_OPTIONS"] = f"-Xmx{max(256, memory_mb // 2)}m"
+        # glibc reserva uma arena de 64 MB de endereçamento por thread; as threads do compilador
+        # da JVM esgotavam o limite (visto no CI). Duas arenas bastam para as ferramentas.
+        env["MALLOC_ARENA_MAX"] = "2"
     log.parent.mkdir(parents=True, exist_ok=True)
     kwargs: dict[str, Any] = {"stdin": subprocess.DEVNULL, "stdout": subprocess.PIPE}
     if stdout_file is not None:
