@@ -46,6 +46,18 @@ class ProbeTests(unittest.TestCase):
         self.assertIn("dependência ausente: java", rows["apktool"]["note"])
         self.assertEqual(rows["java"]["status"], "missing")
 
+    def test_missing_tool_keeps_its_reason_and_lists_missing_dependency(self) -> None:
+        real_resolve = resolve
+
+        def fake_resolve(spec):
+            return None if spec.key in ("java", "apktool") else real_resolve(spec)
+
+        with mock.patch("ure.tools.resolve", side_effect=fake_resolve):
+            rows = {r["key"]: r for r in probe_all()}
+        self.assertEqual(rows["apktool"]["status"], "missing")
+        self.assertIn("não encontrado", rows["apktool"]["note"])
+        self.assertIn("dependência ausente: java", rows["apktool"]["note"])
+
     @unittest.skipUnless(HAS_APKTOOL, "apktool não instalado neste servidor")
     def test_self_test_runs_apktool_for_real(self) -> None:
         result = self_test(SPECS_BY_KEY["apktool"])

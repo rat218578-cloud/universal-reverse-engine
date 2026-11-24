@@ -136,8 +136,10 @@ def probe_all() -> list[dict[str, Any]]:
     status = {r["key"]: r["status"] for r in rows}
     for row in rows:
         row["pending"] = [k for k in row["requires"] if status.get(k) != "available"]
-        if row["status"] == "available" and row["pending"]:
-            row["note"] = "dependência ausente: " + ", ".join(row["pending"])
+        if row["pending"]:
+            dep = "dependência ausente: " + ", ".join(row["pending"])
+            # Ferramenta ausente com dependência ausente: o motivo da ausência é mantido e a dependência é acrescentada.
+            row["note"] = f"{row['note']}; {dep}" if row["status"] != "available" and row["note"] else dep
     return rows
 
 

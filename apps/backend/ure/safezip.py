@@ -60,6 +60,11 @@ class _Totals:
     comp: int = 0
 
 
+def raw_name(info: zipfile.ZipInfo) -> str:
+    """Nome gravado no ZIP, antes de o zipfile normalizar separadores (ex.: '\\' no Windows)."""
+    return getattr(info, "orig_filename", None) or info.filename
+
+
 def clean_entry_name(name: str) -> PurePosixPath:
     if not name or "\x00" in name or "\\" in name or name.startswith("/") or _DRIVE.match(name):
         raise UnsafeArchiveError(f"nome inseguro: {name!r}")
@@ -109,6 +114,7 @@ def _plan(infos: list[zipfile.ZipInfo], report: ExtractionReport, guard: Guard |
     for index, info in enumerate(infos):
         if guard is not None:
             guard.check()
+        clean_entry_name(raw_name(info))  # o nome original é o que vale para a segurança
         name = clean_entry_name(info.filename)
         mode = (info.external_attr >> 16) & 0xFFFF
         if stat.S_ISLNK(mode):
@@ -246,6 +252,7 @@ def inventory_zip(archive: Path, *, max_entries: int) -> dict:
         unsafe: list[dict] = []
         for index, info in enumerate(infos):
             try:
+                clean_entry_name(raw_name(info))
                 name = clean_entry_name(info.filename).as_posix()
             except UnsafeArchiveError as exc:
                 unsafe.append({"index": index, "name": info.filename, "reason": str(exc)})
