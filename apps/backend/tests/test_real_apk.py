@@ -74,7 +74,11 @@ class RealApkFlowTests(ApiCase):
         apk = make_zip(self.tmp / "real.apk", real_apk_entries())
         _, _, report = self.upload_and_analyze(apk.read_bytes())
         engine = report["engines"]["apktool"]
-        self.assertEqual(engine["status"], "ok", engine)
+        if engine["status"] != "ok":
+            # Mostra a saída real do Apktool, sem a qual a falha no CI não é diagnosticável.
+            logs = [p for p in Path(self.settings.data_dir).rglob("apktool.log")]
+            tail = logs[0].read_text(encoding="utf-8", errors="replace")[-2000:] if logs else "(log ausente)"
+            self.fail(f"apktool não decodificou o APK: {engine}\n--- apktool.log (fim) ---\n{tail}")
         self.assertTrue(engine["produced"]["manifest_xml"])
         self.assertTrue(engine["produced"]["resources"])
         self.assertGreaterEqual(engine["produced"]["smali_dirs"], 1)
