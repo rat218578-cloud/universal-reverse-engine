@@ -12,7 +12,9 @@ def make_zip(path: Path, entries: list[tuple[str, bytes, int | None]]) -> Path:
     """entries: (nome, conteúdo, modo_unix ou None). Modo permite criar links simbólicos."""
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
         for name, data, mode in entries:
-            info = zipfile.ZipInfo(name)
+            # Nome gravado tal como recebido: ZipInfo(nome) normalizaria '\\' para '/' no Windows.
+            info = zipfile.ZipInfo()
+            info.filename = name
             info.compress_type = zipfile.ZIP_DEFLATED
             if mode is not None:
                 info.external_attr = (mode & 0xFFFF) << 16
