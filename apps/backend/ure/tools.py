@@ -81,6 +81,8 @@ def _version(path: str, args: tuple[str, ...]) -> str | None:
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
+    if proc.returncode != 0:  # saída com erro não é versão
+        return None
     text = f"{proc.stdout or ''}\n{proc.stderr or ''}"
     # a JVM imprime avisos como "Picked up JAVA_TOOL_OPTIONS" antes da versão real
     lines = [ln.strip() for ln in text.splitlines()
@@ -121,13 +123,15 @@ def probe(spec: ToolSpec) -> dict[str, Any]:
     if path is None:
         hint = f"defina {spec.env_var} ou instale no PATH" if spec.env_var else "instale no PATH"
         return {**base, "status": "missing", "path": None, "version": None, "note": f"não encontrado; {hint}"}
-    return {
-        **base,
-        "status": "available",
-        "path": path,
-        "version": _version(path, spec.version_args) or "versão não determinada",
-        "note": "",
-    }
+    # Existir no disco não basta: o executável precisa rodar o comando de versão com sucesso.
+    if not spec.version_args:
+        return {**base, "status": "missing", "path": path, "version": None,
+                "note": "encontrado, mas sem comando de teste definido: não validado"}
+    version = _version(path, spec.version_args)
+    if version is None:
+        return {**base, "status": "missing", "path": path, "version": None,
+                "note": f"encontrado em {path}, mas o comando de versão não executou com sucesso"}
+    return {**base, "status": "available", "path": path, "version": version, "note": ""}
 
 
 def probe_all() -> list[dict[str, Any]]:

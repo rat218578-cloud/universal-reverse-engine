@@ -35,6 +35,19 @@ class ProbeTests(unittest.TestCase):
                     self.assertIsNone(row["path"])
                 self.assertTrue(row["note"], "ausência precisa de motivo")
 
+    def test_file_that_does_not_run_is_not_reported_as_available(self) -> None:
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            fake = tmp / "apktool"
+            fake.write_text("#!/bin/sh\necho 'falha ao iniciar' >&2\nexit 3\n", encoding="utf-8")
+            fake.chmod(0o755)
+            with mock.patch("ure.tools.resolve", side_effect=lambda spec: str(fake) if spec.key == "apktool" else None):
+                row = {r["key"]: r for r in probe_all()}["apktool"]
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        self.assertEqual(row["status"], "missing", row)
+        self.assertIn("não executou com sucesso", row["note"])
+
     def test_missing_dependency_is_listed_as_pending(self) -> None:
         real_resolve = resolve
 
@@ -109,6 +122,45 @@ class RunToolLimitsTests(unittest.TestCase):
         if os.name == "posix":
             self.assertEqual(captured["env"]["JAVA_TOOL_OPTIONS"], "-Xmx1536m")
             self.assertEqual(captured["env"]["MALLOC_ARENA_MAX"], "2")
+
+
+class LiefStatusTests(unittest.TestCase):
+    """O worker sai com código 0 mesmo quando o LIEF não importa; o status precisa refletir isso."""
+
+    def _fake_python(self, tmp: Path, json_line: str) -> Path:
+        py = tmp / "fake-python"
+        py.write_text("#!/bin/sh\ncat <<'EOF'\n" + json_line + "\nEOF\n", encoding="utf-8")
+        py.chmod(0o755)
+        return py
+
+    def _run(self, json_line: str) -> dict:
+        from ure.config import Settings
+        from ure.engines import lief_inspect
+
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            py = self._fake_python(tmp, json_line)
+            target = tmp / "x.so"
+            target.write_bytes(b"\x7fELF")
+            logs = tmp / "logs"
+            logs.mkdir()
+            with mock.patch.dict(os.environ, {"URE_LIEF_PYTHON": str(py)}):
+                return lief_inspect(target, Settings.from_env(), logs, "t")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    @unittest.skipUnless(os.name == "posix", "interpretador de teste em shell")
+    def test_lief_module_absent_is_missing_with_reason_not_failed(self) -> None:
+        out = self._run('{"error": "ModuleNotFoundError", "reason": "No module named \'lief\'", "lief_version": "indisponível"}')
+        self.assertEqual(out["status"], "missing", out)
+        self.assertIn("LIEF não instalado", out["reason"])
+        self.assertNotIn("result", out)
+
+    @unittest.skipUnless(os.name == "posix", "interpretador de teste em shell")
+    def test_other_worker_error_is_failed_with_reason(self) -> None:
+        out = self._run('{"error": "ValueError", "reason": "formato inesperado"}')
+        self.assertEqual(out["status"], "failed", out)
+        self.assertIn("formato inesperado", out["reason"])
 
 
 class ToolsEnvFileTests(unittest.TestCase):

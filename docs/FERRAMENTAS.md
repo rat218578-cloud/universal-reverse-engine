@@ -61,3 +61,24 @@ esgotem o endereçamento. Esses ajustes foram necessários porque o CI Ubuntu fa
 - Construção da imagem Docker.
 - Análise com JADX, Ghidra, ILSpy e apkanalyzer (ausentes).
 - Análise de .NET (ILSpy) e de bibliotecas nativas com Ghidra.
+
+## Ambientes de processamento (importante)
+
+O URE roda em dois lugares diferentes, com ferramentas diferentes:
+
+- **Servidor (Linux):** `ure/server.py` carrega `URE_TOOLS_ENV` (padrão `/opt/ure-tools/tools.env`).
+  É aqui que Java, Apktool, .NET e LIEF estão instalados e são reconhecidos.
+- **Aplicativo Android (Chaquopy):** `ure_android.py` sobe o backend em Python embutido, dentro do
+  processo do app. Ele **não** lê `/opt/ure-tools/tools.env`, e o APK não contém Java, Apktool, JADX,
+  apkanalyzer, ILSpy nem Ghidra. Por isso a tela do aparelho mostra essas ferramentas como ausentes.
+  O LIEF também não é instalado: `chaquopy.gradle` não declara nenhum pacote Python, e o índice de
+  pacotes do Chaquopy não é acessível daqui para confirmar se há um wheel do LIEF para Android.
+
+Para analisar um APK com as ferramentas instaladas, o APK precisa ser processado pelo servidor.
+
+## Regras de status (desde a última correção)
+
+- Ferramenta `available` exige que o comando de versão execute com código 0. Arquivo que existe mas
+  não executa aparece como `missing`, com o motivo.
+- LIEF: quando o módulo não importa, o motor de análise reporta `missing` com o motivo (não `failed`).
+  Erros do worker que não são módulo ausente continuam `failed`.

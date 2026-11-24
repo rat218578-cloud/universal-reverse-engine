@@ -110,8 +110,18 @@ def lief_inspect(target: Path, settings: Settings, logs: Path, label: str,
     result: dict[str, Any] = {"tool": "lief", **res}
     if res["status"] == "ok":
         try:
-            result["result"] = json.loads(out.read_text(encoding="utf-8"))
+            data = json.loads(out.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             result["status"] = "failed"
             result["reason"] = f"saída do worker inválida: {exc}"
+            return result
+        if "error" in data:
+            # O worker sai com código 0 e relata o erro no JSON; sem tratar isso, um LIEF ausente
+            # apareceria como execução bem-sucedida. Módulo ausente = missing; o resto = failed.
+            module_missing = data.get("error") == "ModuleNotFoundError" and "lief" in str(data.get("reason", ""))
+            result["status"] = "missing" if module_missing else "failed"
+            prefix = "LIEF não instalado neste interpretador" if module_missing else "LIEF falhou"
+            result["reason"] = f"{prefix}: {data.get('reason', 'motivo não informado')} (interpretador {py})"
+        else:
+            result["result"] = data
     return result
