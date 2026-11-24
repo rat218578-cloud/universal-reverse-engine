@@ -15,6 +15,7 @@ from tests.test_api import ApiCase
 from ure.app import make_server
 from ure.tools import SPECS, SPECS_BY_KEY, load_tools_env, probe_all, resolve, self_test, startup_lines
 
+load_tools_env()  # respeita URE_TOOLS_ENV / tools.env instalado pelo script
 HAS_APKTOOL = resolve(SPECS_BY_KEY["apktool"]) is not None
 
 

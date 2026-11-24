@@ -18,8 +18,9 @@ from unittest import mock
 
 from tests.helpers import make_zip, native_fixture_bytes, real_apk_entries
 from tests.test_api import ApiCase
-from ure.tools import SPECS_BY_KEY, resolve
+from ure.tools import SPECS_BY_KEY, load_tools_env, resolve
 
+load_tools_env()  # respeita URE_TOOLS_ENV / tools.env instalado pelo script
 LIEF_PY_CANDIDATES = (os.environ.get("URE_LIEF_PYTHON"), "/opt/ure-tools/venv/bin/python", sys.executable)
 
 

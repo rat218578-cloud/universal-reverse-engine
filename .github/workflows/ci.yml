@@ -10,11 +10,24 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Instalar ferramentas de engenharia reversa (Java, Apktool, LIEF)
+        env:
+          URE_TOOLS_HOME: ${{ runner.temp }}/ure-tools
+          URE_SKIP_DOTNET: "1"
+        run: sudo -E bash scripts/install-tools.sh
+      - name: Diagnóstico das ferramentas
+        env:
+          URE_TOOLS_ENV: ${{ runner.temp }}/ure-tools/tools.env
+        run: PYTHONPATH=apps/backend python -m ure.toolcheck
       - name: Testes unitários e de integração do backend
         working-directory: apps/backend
+        env:
+          URE_TOOLS_ENV: ${{ runner.temp }}/ure-tools/tools.env
         run: python -m unittest discover -s tests -t . -v
       - name: E2E de segurança com servidor real
         working-directory: apps/backend
+        env:
+          URE_TOOLS_ENV: ${{ runner.temp }}/ure-tools/tools.env
         run: python scripts/e2e_security.py
   web:
     runs-on: ubuntu-latest
