@@ -16,11 +16,15 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import warnings
+
 from tests.helpers import make_zip, native_fixture_bytes, real_apk_entries
 from tests.test_api import ApiCase
 from ure.tools import SPECS_BY_KEY, load_tools_env, resolve
 
 load_tools_env()  # respeita URE_TOOLS_ENV / tools.env instalado pelo script
+# zipfile avisa ao gravar nomes repetidos: as duplicatas destes testes são intencionais.
+warnings.filterwarnings("ignore", message="Duplicate name", category=UserWarning)
 LIEF_PY_CANDIDATES = (os.environ.get("URE_LIEF_PYTHON"), "/opt/ure-tools/venv/bin/python", sys.executable)
 
 
@@ -127,6 +131,46 @@ class RealApkFlowTests(ApiCase):
         self.assertNotIn("extração recusada", report["engines"]["apktool"].get("reason", ""))
         self.assertIn("inventory", report)
         self.assertEqual(report["inventory"]["duplicates"][0]["crc_and_size"], "diferentes")
+
+    def test_identical_duplicates_are_deduplicated_and_analysis_completes(self) -> None:
+        entries = real_apk_entries() + [("res/yHu.xml", b"<x/>", None), ("res/yHu.xml", b"<x/>", None)]
+        apk = make_zip(self.tmp / "same.apk", entries)
+        _, _, report = self.upload_and_analyze(apk.read_bytes())
+        self.assertEqual(report["extraction"]["status"], "ok", report["extraction"])
+        dup = [d for d in report["extraction"]["duplicates"] if d["name"] == "res/yHu.xml"][0]
+        self.assertEqual(dup["status"], "identica")
+        self.assertEqual(dup["occurrences"], 2)
+        self.assertEqual(dup["quarantined"], [])
+        self.assertEqual(dup["kept"], "res/yHu.xml")
+        self.assertFalse([i for i in report["indicators"] if "conflito de conteúdo" in i["value"]])
+        self.assertEqual(report["inventory"]["duplicates"][0]["crc_and_size"], "iguais")
+
+    def test_many_duplicate_groups_in_one_apk_are_each_classified(self) -> None:
+        entries = real_apk_entries() + [
+            ("res/a.xml", b"<same/>", None), ("res/a.xml", b"<same/>", None),          # idênticas
+            ("res/b.xml", b"<one/>", None), ("res/b.xml", b"<two/>", None),            # conflitantes
+            ("res/c.xml", b"<p/>", None), ("res/c.xml", b"<q/>", None), ("res/c.xml", b"<r/>", None),
+            ("res/d.xml", b"<k/>", None), ("res/d.xml", b"<k/>", None), ("res/d.xml", b"<k/>", None),
+        ]
+        apk = make_zip(self.tmp / "many.apk", entries)
+        _, _, report = self.upload_and_analyze(apk.read_bytes())
+        self.assertEqual(report["extraction"]["status"], "ok", report["extraction"])
+        by_name = {d["name"]: d for d in report["extraction"]["duplicates"]}
+        self.assertEqual(set(by_name), {"res/a.xml", "res/b.xml", "res/c.xml", "res/d.xml"})
+        self.assertEqual(by_name["res/a.xml"]["status"], "identica")
+        self.assertEqual(by_name["res/d.xml"]["status"], "identica")
+        self.assertEqual(by_name["res/d.xml"]["occurrences"], 3)
+        for name, copies in (("res/b.xml", 2), ("res/c.xml", 3)):
+            self.assertEqual(by_name[name]["status"], "conflitante", name)
+            self.assertIsNone(by_name[name]["kept"], name)
+            self.assertEqual(len(by_name[name]["quarantined"]), copies, name)
+            self.assertEqual(len(set(by_name[name]["sha256"])), copies, name)
+        conflicts = sorted(i["value"] for i in report["indicators"] if "conflito de conteúdo" in i["value"])
+        self.assertEqual(conflicts, ["conflito de conteúdo: res/b.xml", "conflito de conteúdo: res/c.xml"])
+        inv = {d["name"]: d["crc_and_size"] for d in report["inventory"]["duplicates"]}
+        self.assertEqual(inv, {"res/a.xml": "iguais", "res/b.xml": "diferentes",
+                               "res/c.xml": "diferentes", "res/d.xml": "iguais"})
+        self.assertNotIn("extração recusada", report["engines"]["apktool"].get("reason", ""))
 
     def test_unsafe_entry_blocks_decompilers_but_keeps_safe_inventory(self) -> None:
         entries = real_apk_entries() + [("../evil.txt", b"x", None)]
