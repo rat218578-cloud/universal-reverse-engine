@@ -14,19 +14,13 @@ import warnings
 import zipfile
 from pathlib import Path
 
-from tests.helpers import make_zip
+from tests.helpers import make_zip, real_apk_entries
 from ure.safezip import ArchiveLimitError, UnsafeArchiveError, inventory_zip, safe_extract_zip
 
 # zipfile avisa ao gravar nomes repetidos; a duplicata é intencional neste módulo.
 warnings.filterwarnings("ignore", message="Duplicate name", category=UserWarning)
 
-FIXTURES = Path(__file__).parent / "fixtures" / "real"
 LIMITS = {"max_entries": 1000, "max_total_bytes": 64 * 1024 * 1024, "max_ratio": 100.0}
-
-
-def real_apk_entries() -> list[tuple[str, bytes, int | None]]:
-    with zipfile.ZipFile(FIXTURES / "fixture.apk") as zf:
-        return [(i.filename, zf.read(i.filename), None) for i in zf.infolist() if not i.is_dir()]
 
 
 def sha256_of(path: Path) -> str:

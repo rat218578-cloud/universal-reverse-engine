@@ -7,6 +7,7 @@ import threading
 
 from .app import make_server
 from .config import Settings
+from .tools import load_tools_env, probe_all, startup_lines
 
 
 def _watch_parent_pipe() -> None:
@@ -25,6 +26,7 @@ def _watch_parent_pipe() -> None:
 
 
 def main() -> None:
+    tools_env = load_tools_env()
     settings = Settings.from_env()
     if os.environ.get("URE_PARENT_WATCH") == "1":
         threading.Thread(target=_watch_parent_pipe, name="parent-watch", daemon=True).start()
@@ -37,6 +39,9 @@ def main() -> None:
     host, port = server.server_address[:2]
     print(f"Universal Reverse Engine em http://{host}:{port}", flush=True)
     print(f"Token de sessão: {settings.data_dir / 'session.token'} (ou variável URE_TOKEN)", flush=True)
+    print(f"Arquivo de ferramentas: {tools_env or 'não encontrado (usando o PATH)'}", flush=True)
+    for line in startup_lines(probe_all()):
+        print(line, flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

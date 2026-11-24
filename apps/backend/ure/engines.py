@@ -4,12 +4,17 @@ Ferramenta ausente retorna status 'missing' com motivo. Nenhum resultado é simu
 """
 from __future__ import annotations
 
+import json
+import os
+import sys
 from pathlib import Path
 from typing import Any
 
 from .config import Settings
 from .limits import Guard
 from .tools import SPECS_BY_KEY, resolve, run_tool
+
+LIEF_WORKER = Path(__file__).with_name("lief_worker.py")
 
 
 def _invoke(key: str, args: list[str], settings: Settings, logs: Path, *,
@@ -82,3 +87,31 @@ def ghidra_analyze(binary: Path, settings: Settings, logs: Path, guard: Guard | 
     if res["status"] == "ok":
         res["produced"] = {"note": "importação e auto-análise executadas; saída detalhada apenas no log"}
     return res
+
+
+def lief_inspect(target: Path, settings: Settings, logs: Path, label: str,
+                 guard: Guard | None = None) -> dict[str, Any]:
+    """Estrutura de ELF, PE, Mach-O ou DEX com LIEF. Roda em processo separado, com limite de
+    memória e tempo; o resultado é o JSON produzido pelo worker, sem interpretação extra."""
+    py = os.environ.get("URE_LIEF_PYTHON") or sys.executable
+    if not (os.path.isfile(py) and os.access(py, os.X_OK)):
+        return {"tool": "lief", "status": "missing", "reason": f"interpretador do LIEF não encontrado: {py}"}
+    timeout = settings.tool_timeout_s
+    cancel = None
+    if guard is not None:
+        timeout = min(timeout, guard.remaining())
+        cancel = guard.cancel
+    out = logs / f"lief-{label}.json"
+    res = run_tool(
+        [py, str(LIEF_WORKER), str(target)],
+        cwd=logs, timeout_s=timeout, memory_mb=settings.tool_memory_mb,
+        log=logs / f"lief-{label}.log", stdout_file=out, cancel=cancel,
+    )
+    result: dict[str, Any] = {"tool": "lief", **res}
+    if res["status"] == "ok":
+        try:
+            result["result"] = json.loads(out.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            result["status"] = "failed"
+            result["reason"] = f"saída do worker inválida: {exc}"
+    return result

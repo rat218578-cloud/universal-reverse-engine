@@ -29,20 +29,27 @@ class ToolSpec:
     version_args: tuple[str, ...]
     env_var: str
     jvm: bool = False
+    # Chaves de outras ferramentas que precisam estar disponíveis para esta funcionar.
+    requires: tuple[str, ...] = ()
 
 
 SPECS: tuple[ToolSpec, ...] = (
-    ToolSpec("java", "Java Runtime", "requisito de JADX, apktool e ILSpy", ("java",), ("-version",), "URE_JAVA"),
+    ToolSpec("java", "Java Runtime", "requisito de Apktool, JADX, apkanalyzer e Ghidra",
+             ("java",), ("-version",), "URE_JAVA"),
+    ToolSpec("dotnet", ".NET SDK/Runtime", "requisito do ilspycmd",
+             ("dotnet",), ("--version",), "URE_DOTNET"),
     ToolSpec("apktool", "Apktool", "decodificação de APK: Manifest, recursos, Smali",
-             ("apktool",), ("--version",), "URE_APKTOOL", jvm=True),
-    ToolSpec("jadx", "JADX", "descompilação de DEX para Java", ("jadx",), ("--version",), "URE_JADX", jvm=True),
+             ("apktool",), ("--version",), "URE_APKTOOL", jvm=True, requires=("java",)),
+    ToolSpec("jadx", "JADX", "descompilação de DEX para Java", ("jadx",), ("--version",), "URE_JADX",
+             jvm=True, requires=("java",)),
     ToolSpec("apkanalyzer", "Android SDK apkanalyzer", "metadados do APK pelo SDK Android",
-             ("apkanalyzer",), ("--version",), "URE_APKANALYZER", jvm=True),
+             ("apkanalyzer",), ("--version",), "URE_APKANALYZER", jvm=True, requires=("java",)),
     ToolSpec("ilspycmd", "ILSpy (ilspycmd)", "descompilação de assemblies .NET",
-             ("ilspycmd",), ("--version",), "URE_ILSPYCMD"),
+             ("ilspycmd",), ("--version",), "URE_ILSPYCMD", requires=("dotnet",)),
     ToolSpec("ghidra", "Ghidra analyzeHeadless", "análise nativa de PE/ELF (headless)",
-             ("analyzeHeadless", "ghidra_analyzeHeadless"), (), "URE_GHIDRA", jvm=True),
-    ToolSpec("lief", "LIEF (biblioteca Python)", "análise binária avançada (opcional)", (), (), ""),
+             ("analyzeHeadless", "ghidra_analyzeHeadless"), (), "URE_GHIDRA", jvm=True, requires=("java",)),
+    ToolSpec("lief", "LIEF (biblioteca Python)", "análise de estruturas ELF, PE e Mach-O",
+             (), (), "URE_LIEF_PYTHON"),
 )
 SPECS_BY_KEY = {s.key: s for s in SPECS}
 
@@ -84,12 +91,32 @@ def _version(path: str, args: tuple[str, ...]) -> str | None:
     return preferred[:120]
 
 
+_LIEF_PROBE = "import lief, sys; sys.stdout.write(lief.__version__)"
+DEFAULT_TOOLS_ENV = Path("/opt/ure-tools/tools.env")
+
+
+def _probe_lief() -> dict[str, Any]:
+    """LIEF é testado no interpretador configurado (URE_LIEF_PYTHON), não no do servidor."""
+    py = os.environ.get("URE_LIEF_PYTHON") or sys.executable
+    if not (os.path.isfile(py) and os.access(py, os.X_OK)):
+        return {"status": "missing", "path": None, "version": None,
+                "note": f"interpretador não encontrado: {py}; instale com scripts/install-tools.sh"}
+    try:
+        proc = subprocess.run([py, "-c", _LIEF_PROBE], capture_output=True, text=True, timeout=30,
+                              stdin=subprocess.DEVNULL, env=child_env())
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"status": "missing", "path": py, "version": None, "note": f"falha ao testar LIEF: {exc}"}
+    if proc.returncode != 0:
+        last = (proc.stderr or "").strip().splitlines()[-1:] or ["erro desconhecido"]
+        return {"status": "missing", "path": py, "version": None, "note": f"lief não importa: {last[0][:160]}"}
+    return {"status": "available", "path": py, "version": f"LIEF {proc.stdout.strip() or 'versão não determinada'}",
+            "note": ""}
+
+
 def probe(spec: ToolSpec) -> dict[str, Any]:
-    base = {"key": spec.key, "name": spec.name, "purpose": spec.purpose}
+    base = {"key": spec.key, "name": spec.name, "purpose": spec.purpose, "requires": list(spec.requires)}
     if spec.key == "lief":
-        found = importlib.util.find_spec("lief") is not None
-        note = "" if found else "não instalado; a análise PE usa o analisador próprio do URE"
-        return {**base, "status": "available" if found else "missing", "path": None, "version": None, "note": note}
+        return {**base, **_probe_lief()}
     path = resolve(spec)
     if path is None:
         hint = f"defina {spec.env_var} ou instale no PATH" if spec.env_var else "instale no PATH"
@@ -104,7 +131,57 @@ def probe(spec: ToolSpec) -> dict[str, Any]:
 
 
 def probe_all() -> list[dict[str, Any]]:
-    return [probe(spec) for spec in SPECS]
+    """Estado real de cada ferramenta, com as dependências que faltam para ela funcionar."""
+    rows = [probe(spec) for spec in SPECS]
+    status = {r["key"]: r["status"] for r in rows}
+    for row in rows:
+        row["pending"] = [k for k in row["requires"] if status.get(k) != "available"]
+        if row["status"] == "available" and row["pending"]:
+            row["note"] = "dependência ausente: " + ", ".join(row["pending"])
+    return rows
+
+
+def self_test(spec: ToolSpec, timeout_s: float = 30) -> dict[str, Any]:
+    """Executa a ferramenta de verdade (versão, ou importação para o LIEF) e reporta o resultado."""
+    row = probe(spec)
+    if row["status"] != "available":
+        return {"key": spec.key, "ok": False, "status": "missing", "path": None, "exit_code": None,
+                "detail": row["note"]}
+    argv = [row["path"], "-c", _LIEF_PROBE] if spec.key == "lief" else [row["path"], *spec.version_args]
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout_s,
+                              stdin=subprocess.DEVNULL, env=child_env())
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"key": spec.key, "ok": False, "status": "failed", "path": row["path"], "exit_code": None,
+                "detail": str(exc)}
+    text = "\n".join(ln for ln in f"{proc.stdout or ''}\n{proc.stderr or ''}".splitlines()
+                     if ln.strip() and not ln.lstrip().startswith(("Picked up", "NOTE:")))
+    ok = proc.returncode == 0
+    return {"key": spec.key, "ok": ok, "status": "ok" if ok else "failed", "path": row["path"],
+            "exit_code": proc.returncode, "detail": text[-600:]}
+
+
+def load_tools_env() -> Path | None:
+    """Carrega o arquivo de ambiente das ferramentas (URE_TOOLS_ENV ou /opt/ure-tools/tools.env).
+    Só chaves URE_* são aceitas e variáveis já definidas no ambiente têm precedência."""
+    from .config import load_env_file  # import local: evita ciclo na inicialização
+    raw = os.environ.get("URE_TOOLS_ENV")
+    path = Path(raw).expanduser() if raw else DEFAULT_TOOLS_ENV
+    if path.is_file():
+        load_env_file(path)
+        return path
+    return None
+
+
+def startup_lines(rows: list[dict[str, Any]]) -> list[str]:
+    """Linhas de diagnóstico impressas na inicialização do servidor."""
+    lines = []
+    for r in rows:
+        if r["status"] == "available":
+            lines.append(f"[ferramentas] {r['key']}: {r['version']} em {r['path']}")
+        else:
+            lines.append(f"[ferramentas] {r['key']}: AUSENTE. {r['note']}")
+    return lines
 
 
 MAX_CAPTURE_BYTES = 4 * MB

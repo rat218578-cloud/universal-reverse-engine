@@ -52,7 +52,7 @@ from .storage import (
     safe_join,
     valid_id,
 )
-from .tools import probe_all
+from .tools import SPECS_BY_KEY, probe_all, self_test
 
 def _resolve_web_root() -> Path:
     """Interface: URE_WEB_DIR, depois a cópia empacotada (wheel), depois o repositório (desenvolvimento)."""
@@ -445,6 +445,13 @@ def tools_status(a: App, h: Any, m: Any, q: dict[str, str]) -> tuple[int, Any]:
     return 200, {"tools": probe_all()}
 
 
+def tool_selftest(a: App, h: Any, m: Any, q: dict[str, str]) -> tuple[int, Any]:
+    key = m.group(1)
+    if key not in SPECS_BY_KEY:
+        raise ApiError(404, "ferramenta desconhecida")
+    return 200, self_test(SPECS_BY_KEY[key])
+
+
 def ai_status(a: App, h: Any, m: Any, q: dict[str, str]) -> tuple[int, Any]:
     return 200, a.ai.status()
 
@@ -486,6 +493,7 @@ ROUTES: list[tuple[str, re.Pattern[str], Callable[..., tuple[int, Any]]]] = [
     ("POST", re.compile(r"/api/v1/jobs/" + ID + "/cancel"), cancel_job),
     ("POST", re.compile(r"/api/v1/jobs/" + ID + "/retry"), retry_job),
     ("GET", re.compile(r"/api/v1/tools"), tools_status),
+    ("POST", re.compile(r"/api/v1/tools/([a-z]+)/test"), tool_selftest),
     ("GET", re.compile(r"/api/v1/ai/status"), ai_status),
     ("POST", re.compile(rf"/api/v1/projects/{ID}/artifacts/{ID}/ask"), ask_artifact),
 ]

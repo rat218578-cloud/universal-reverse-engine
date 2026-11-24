@@ -20,6 +20,19 @@ def make_zip(path: Path, entries: list[tuple[str, bytes, int | None]]) -> Path:
     return path
 
 
+FIXTURE_DIR = Path(__file__).parent / "fixtures" / "real"
+
+
+def real_apk_entries() -> list[tuple[str, bytes, int | None]]:
+    """Entradas do APK real gerado pelo Apktool (tests/fixtures/real/fixture.apk)."""
+    with zipfile.ZipFile(FIXTURE_DIR / "fixture.apk") as zf:
+        return [(i.filename, zf.read(i.filename), None) for i in zf.infolist() if not i.is_dir()]
+
+
+def native_fixture_bytes() -> bytes:
+    return (FIXTURE_DIR / "libfixture.so").read_bytes()
+
+
 def synthetic_apk(path: Path, extra: list[tuple[str, bytes, int | None]] | None = None) -> Path:
     entries = [
         ("AndroidManifest.xml", b"\x03\x00\x08\x00 binary-manifest", None),

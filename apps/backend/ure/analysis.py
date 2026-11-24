@@ -15,7 +15,8 @@ from pathlib import Path
 from typing import Any
 
 from .compliance import scan_licenses, size_summary
-from .engines import apkanalyzer_manifest, apktool_decode, ghidra_analyze, ilspy_decompile, jadx_decompile
+from .engines import (apkanalyzer_manifest, apktool_decode, ghidra_analyze, ilspy_decompile,
+                      jadx_decompile, lief_inspect)
 from .files import sha256_file
 from .identify import KIND_APK, KIND_JAR, KIND_PE, KIND_ZIP
 from .jobs import BusyError
@@ -31,6 +32,7 @@ SUSPICIOUS_IMPORTS = frozenset({
     "SetWindowsHookExA", "SetWindowsHookExW", "IsDebuggerPresent", "NtQueryInformationProcess",
 })
 DEX_TOP = re.compile(r"classes\d*\.dex")
+MAX_LIEF_FILES = 16
 CONTAINER_KINDS = frozenset({KIND_APK, KIND_JAR, KIND_ZIP})
 INDICATOR_NOTE = "indicador estático: não comprova comportamento malicioso"
 LOCK_WAIT_S = 60.0
@@ -118,6 +120,7 @@ def _analyze_pe(root: Path, original: Path, s: Any, logs: Path, report: dict[str
     }
     for fn in sorted({n for names in imports.values() for n in names if n in SUSPICIOUS_IMPORTS}):
         report["indicators"].append({"type": "import", "value": fn, "note": INDICATOR_NOTE})
+    report["engines"]["lief"] = lief_inspect(original, s, logs, "pe", guard)
     if pe["clr_runtime"]:
         progress(0.4, "descompilação .NET (ILSpy)")
         report["engines"]["ilspycmd"] = ilspy_decompile(original, root / "decompiled" / "ilspy", s, logs, guard)
@@ -177,6 +180,24 @@ def _analyze_container(root: Path, original: Path, art: dict[str, Any], s: Any, 
         "source": "extraido" if failure is None else ("inventario" if inventory_ok else "indisponivel"),
     }
     is_apk = art["kind"] == KIND_APK
+    # LIEF lê as bibliotecas e o DEX já extraídos; sem extração aceita, não é executado.
+    if failure is None:
+        natives = [n for n in names if n.startswith("lib/") and n.endswith(".so")][:MAX_LIEF_FILES]
+        dexes = report["dependencies"]["dex_files"][:MAX_LIEF_FILES]
+        items = []
+        for i, name in enumerate([*natives, *dexes]):
+            res = lief_inspect(extracted / name, s, logs, f"item-{i}", guard)
+            items.append({"path": name, **res})
+        report["structures"] = items
+        statuses = {it["status"] for it in items}
+        report["engines"]["lief"] = {
+            "tool": "lief",
+            "status": ("missing" if "missing" in statuses else "failed" if "failed" in statuses
+                       else "ok" if items else "skipped"),
+            "items": len(items),
+        }
+    else:
+        report["engines"]["lief"] = _skipped(f"extração recusada ({type(failure).__name__}): LIEF não executado")
     # Decompiladores escrevem a partir do conteúdo do arquivo. Se a extração recusou entradas
     # inseguras ou excedeu limites, eles não são executados; o motivo fica registrado.
     blocked = (f"extração recusada ({type(failure).__name__}): decompilador não executado"
