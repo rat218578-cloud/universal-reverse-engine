@@ -30,8 +30,8 @@ class ProbeTests(unittest.TestCase):
                 self.assertTrue(row["path"] and os.path.exists(row["path"]), row)
                 self.assertTrue(row["version"])
             else:
-                # Para o LIEF, o caminho informa o interpretador testado (útil para diagnóstico).
-                if row["key"] != "lief":
+                # Bibliotecas Python: o caminho informa o interpretador testado (útil para diagnóstico).
+                if not SPECS_BY_KEY[row["key"]].python_module:
                     self.assertIsNone(row["path"])
                 self.assertTrue(row["note"], "ausência precisa de motivo")
 
