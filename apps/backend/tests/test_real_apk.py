@@ -20,7 +20,7 @@ import warnings
 
 from tests.helpers import make_zip, native_fixture_bytes, real_apk_entries
 from tests.test_api import ApiCase
-from ure.tools import SPECS_BY_KEY, load_tools_env, resolve
+from ure.tools import SPECS_BY_KEY, load_tools_env, probe_all, resolve
 
 load_tools_env()  # respeita URE_TOOLS_ENV / tools.env instalado pelo script
 # zipfile avisa ao gravar nomes repetidos: as duplicatas destes testes são intencionais.
@@ -41,6 +41,11 @@ def _lief_python() -> str | None:
 LIEF_PY = _lief_python()
 HAS_APKTOOL = resolve(SPECS_BY_KEY["apktool"]) is not None
 HAS_JADX = resolve(SPECS_BY_KEY["jadx"]) is not None
+_STATE = {r["key"]: r["status"] for r in probe_all()}
+HAS_ANDROGUARD = _STATE.get("androguard") == "available"
+HAS_APKSIGNER = _STATE.get("apksigner") == "available"
+HAS_R2 = _STATE.get("radare2") == "available"
+FIXTURES_DOTNET = Path(__file__).parent / "fixtures" / "dotnet"
 
 
 class RealApkFlowTests(ApiCase):
@@ -131,6 +136,36 @@ class RealApkFlowTests(ApiCase):
         self.assertNotIn("extração recusada", report["engines"]["apktool"].get("reason", ""))
         self.assertIn("inventory", report)
         self.assertEqual(report["inventory"]["duplicates"][0]["crc_and_size"], "diferentes")
+
+    def test_androguard_apksigner_and_radare2_are_in_the_report(self) -> None:
+        entries = real_apk_entries() + [("lib/x86_64/libfixture.so", native_fixture_bytes(), None)]
+        apk = make_zip(self.tmp / "engines.apk", entries)
+        _, _, report = self.upload_and_analyze(apk.read_bytes())
+        eng = report["engines"]
+        if LIEF_PY is None and not HAS_APKSIGNER:
+            self.skipTest("nenhum dos motores novos disponível")
+        self.assertEqual(eng["apksigner"]["status"], "ok", eng["apksigner"])
+        self.assertFalse(eng["apksigner"]["verified"])  # fixture não assinado: resultado real
+        if HAS_ANDROGUARD:
+            self.assertEqual(eng["androguard"]["status"], "ok", eng["androguard"])
+            self.assertEqual(eng["androguard"]["result"]["package"], "com.ure.fixture")
+            self.assertEqual(eng["androguard_decompile"]["status"], "ok", eng["androguard_decompile"])
+            self.assertGreaterEqual(eng["androguard_decompile"]["produced"]["java_sources"], 1)
+        if HAS_R2:
+            self.assertEqual(eng["radare2"]["status"], "ok", eng["radare2"])
+            native = [i for i in report["native_functions"] if i["path"] == "lib/x86_64/libfixture.so"][0]
+            self.assertIn("sym.ure_fixture_add", native["result"]["names"])
+
+    def test_dotnet_assembly_upload_runs_monodis_and_reports_ilspy_missing(self) -> None:
+        data = (FIXTURES_DOTNET / "UreSample.dll").read_bytes()
+        _, _, report = self.upload_and_analyze(data, filename="UreSample.dll")
+        self.assertTrue(report["dependencies"].get("clr_runtime"), report["dependencies"])
+        mono = report["engines"]["monodis"]
+        if _STATE.get("monodis") == "available":
+            self.assertEqual(mono["status"], "ok", mono)
+            self.assertIn("Calc::Add", next(Path(self.settings.data_dir).rglob("assembly.il")).read_text(encoding="utf-8"))
+        ilspy = report["engines"]["ilspycmd"]
+        self.assertEqual(ilspy["status"], "missing", ilspy)  # ILSpy não instalado neste servidor
 
     def test_identical_duplicates_are_deduplicated_and_analysis_completes(self) -> None:
         entries = real_apk_entries() + [("res/yHu.xml", b"<x/>", None), ("res/yHu.xml", b"<x/>", None)]

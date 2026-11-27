@@ -31,6 +31,12 @@ class ToolSpec:
     jvm: bool = False
     # Chaves de outras ferramentas que precisam estar disponíveis para esta funcionar.
     requires: tuple[str, ...] = ()
+    # Biblioteca Python: a ferramenta é testada importando este módulo no interpretador de env_var
+    # (ou de URE_LIEF_PYTHON, ou o do próprio servidor).
+    python_module: str = ""
+    # Ferramenta que sai com código diferente de zero no comando de versão: aceita-se a versão se
+    # este texto aparecer na saída (ex.: monodis --version sai com 1 e imprime o nome da ferramenta).
+    version_marker: str = ""
 
 
 SPECS: tuple[ToolSpec, ...] = (
@@ -49,7 +55,18 @@ SPECS: tuple[ToolSpec, ...] = (
     ToolSpec("ghidra", "Ghidra analyzeHeadless", "análise nativa de PE/ELF (headless)",
              ("analyzeHeadless", "ghidra_analyzeHeadless"), (), "URE_GHIDRA", jvm=True, requires=("java",)),
     ToolSpec("lief", "LIEF (biblioteca Python)", "análise de estruturas ELF, PE e Mach-O",
-             (), (), "URE_LIEF_PYTHON"),
+             (), (), "URE_LIEF_PYTHON", python_module="lief"),
+    ToolSpec("androguard", "Androguard (biblioteca Python)",
+             "manifesto, classes, permissões e decompilação DEX para Java (substitui o JADX)",
+             (), (), "URE_ANDROGUARD_PYTHON", python_module="androguard"),
+    ToolSpec("radare2", "radare2", "funções e símbolos de bibliotecas nativas ELF/PE (substitui o Ghidra)",
+             ("r2",), ("-v",), "URE_RADARE2"),
+    ToolSpec("monodis", "monodis (desmontador IL do Mono)",
+             "IL de assemblies .NET (não gera C#; substitui o ILSpy apenas em nível IL)",
+             ("monodis",), ("--version",), "URE_MONODIS", version_marker="Intermediate Language Disassembler"),
+    ToolSpec("apksigner", "apksigner (Android SDK build-tools)",
+             "assinatura e certificados do APK (substitui parte do apkanalyzer)",
+             ("apksigner",), ("--version",), "URE_APKSIGNER", jvm=True, requires=("java",)),
 )
 SPECS_BY_KEY = {s.key: s for s in SPECS}
 
@@ -72,7 +89,7 @@ def resolve(spec: ToolSpec) -> str | None:
     return None
 
 
-def _version(path: str, args: tuple[str, ...]) -> str | None:
+def _version(path: str, args: tuple[str, ...], marker: str = "") -> str | None:
     if not args:
         return None
     try:
@@ -81,9 +98,9 @@ def _version(path: str, args: tuple[str, ...]) -> str | None:
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
-    if proc.returncode != 0:  # saída com erro não é versão
-        return None
     text = f"{proc.stdout or ''}\n{proc.stderr or ''}"
+    if proc.returncode != 0 and not (marker and marker in text):  # saída com erro não é versão
+        return None
     # a JVM imprime avisos como "Picked up JAVA_TOOL_OPTIONS" antes da versão real
     lines = [ln.strip() for ln in text.splitlines()
              if ln.strip() and not ln.lstrip().startswith(("Picked up", "NOTE:", "WARNING:"))]
@@ -93,32 +110,44 @@ def _version(path: str, args: tuple[str, ...]) -> str | None:
     return preferred[:120]
 
 
-_LIEF_PROBE = "import lief, sys; sys.stdout.write(lief.__version__)"
+def _module_probe(module: str) -> str:
+    return f"import {module}, sys; sys.stdout.write({module}.__version__)"
 DEFAULT_TOOLS_ENV = Path("/opt/ure-tools/tools.env")
 
 
-def _probe_lief() -> dict[str, Any]:
-    """LIEF é testado no interpretador configurado (URE_LIEF_PYTHON), não no do servidor."""
-    py = os.environ.get("URE_LIEF_PYTHON") or sys.executable
+def _python_for(spec: ToolSpec) -> str:
+    """Interpretador de uma biblioteca Python: a variável própria, depois a do LIEF, depois o do servidor."""
+    return os.environ.get(spec.env_var) or os.environ.get("URE_LIEF_PYTHON") or sys.executable
+
+
+def _probe_python_module(spec: ToolSpec) -> dict[str, Any]:
+    py = _python_for(spec)
     if not (os.path.isfile(py) and os.access(py, os.X_OK)):
         return {"status": "missing", "path": None, "version": None,
                 "note": f"interpretador não encontrado: {py}; instale com scripts/install-tools.sh"}
     try:
-        proc = subprocess.run([py, "-c", _LIEF_PROBE], capture_output=True, text=True, timeout=30,
-                              stdin=subprocess.DEVNULL, env=child_env())
+        proc = subprocess.run([py, "-c", _module_probe(spec.python_module)], capture_output=True, text=True,
+                              timeout=60, stdin=subprocess.DEVNULL, env=child_env())
     except (OSError, subprocess.TimeoutExpired) as exc:
-        return {"status": "missing", "path": py, "version": None, "note": f"falha ao testar LIEF: {exc}"}
+        return {"status": "missing", "path": py, "version": None, "note": f"falha ao testar {spec.python_module}: {exc}"}
     if proc.returncode != 0:
         last = (proc.stderr or "").strip().splitlines()[-1:] or ["erro desconhecido"]
-        return {"status": "missing", "path": py, "version": None, "note": f"lief não importa: {last[0][:160]}"}
-    return {"status": "available", "path": py, "version": f"LIEF {proc.stdout.strip() or 'versão não determinada'}",
-            "note": ""}
+        return {"status": "missing", "path": py, "version": None,
+                "note": f"{spec.python_module} não importa: {last[0][:160]}"}
+    return {"status": "available", "path": py,
+            "version": f"{spec.python_module} {proc.stdout.strip() or 'versão não determinada'}", "note": ""}
+
+
+def _where() -> str:
+    """Onde o motor roda: no aparelho Android (Chaquopy) ou no servidor. O aparelho marca URE_RUNTIME."""
+    return "aparelho (Android)" if os.environ.get("URE_RUNTIME") == "android" else "servidor"
 
 
 def probe(spec: ToolSpec) -> dict[str, Any]:
-    base = {"key": spec.key, "name": spec.name, "purpose": spec.purpose, "requires": list(spec.requires)}
-    if spec.key == "lief":
-        return {**base, **_probe_lief()}
+    base = {"key": spec.key, "name": spec.name, "purpose": spec.purpose, "requires": list(spec.requires),
+            "where": _where()}
+    if spec.python_module:
+        return {**base, **_probe_python_module(spec)}
     path = resolve(spec)
     if path is None:
         hint = f"defina {spec.env_var} ou instale no PATH" if spec.env_var else "instale no PATH"
@@ -127,7 +156,7 @@ def probe(spec: ToolSpec) -> dict[str, Any]:
     if not spec.version_args:
         return {**base, "status": "missing", "path": path, "version": None,
                 "note": "encontrado, mas sem comando de teste definido: não validado"}
-    version = _version(path, spec.version_args)
+    version = _version(path, spec.version_args, spec.version_marker)
     if version is None:
         return {**base, "status": "missing", "path": path, "version": None,
                 "note": f"encontrado em {path}, mas o comando de versão não executou com sucesso"}
@@ -153,7 +182,7 @@ def self_test(spec: ToolSpec, timeout_s: float = 30) -> dict[str, Any]:
     if row["status"] != "available":
         return {"key": spec.key, "ok": False, "status": "missing", "path": None, "exit_code": None,
                 "detail": row["note"]}
-    argv = [row["path"], "-c", _LIEF_PROBE] if spec.key == "lief" else [row["path"], *spec.version_args]
+    argv = [row["path"], "-c", _module_probe(spec.python_module)] if spec.python_module else [row["path"], *spec.version_args]
     try:
         proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout_s,
                               stdin=subprocess.DEVNULL, env=child_env())
@@ -162,7 +191,7 @@ def self_test(spec: ToolSpec, timeout_s: float = 30) -> dict[str, Any]:
                 "detail": str(exc)}
     text = "\n".join(ln for ln in f"{proc.stdout or ''}\n{proc.stderr or ''}".splitlines()
                      if ln.strip() and not ln.lstrip().startswith(("Picked up", "NOTE:")))
-    ok = proc.returncode == 0
+    ok = proc.returncode == 0 or bool(spec.version_marker and spec.version_marker in text)
     return {"key": spec.key, "ok": ok, "status": "ok" if ok else "failed", "path": row["path"],
             "exit_code": proc.returncode, "detail": text[-600:]}
 
