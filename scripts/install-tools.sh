@@ -23,6 +23,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TOOLS_HOME="${URE_TOOLS_HOME:-/opt/ure-tools}"
 LIEF_VERSION="${URE_LIEF_VERSION:-1.0.0}"
+ANDROGUARD_VERSION="${URE_ANDROGUARD_VERSION:-4.1.4}"
 TOOLS_ENV="$TOOLS_HOME/tools.env"
 MANIFEST="$TOOLS_HOME/manifest.json"
 
@@ -45,7 +46,7 @@ if [ "${URE_SKIP_APT:-0}" != "1" ]; then
   log "apt: Java 17, Apktool e aapt"
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
-  apt-get install -y -qq openjdk-17-jre-headless apktool android-sdk
+  apt-get install -y -qq openjdk-17-jre-headless apktool android-sdk radare2 apksigner mono-utils
   if [ "${URE_SKIP_DOTNET:-0}" != "1" ]; then
     log "apt: SDK .NET 8"
     apt-get install -y -qq dotnet-sdk-8.0
@@ -70,7 +71,8 @@ if [ ! -x "$VENV/bin/python" ]; then
   python3 -m venv "$VENV"
 fi
 log "LIEF $LIEF_VERSION"
-"$VENV/bin/pip" install -q --disable-pip-version-check "lief==$LIEF_VERSION"
+log "Androguard $ANDROGUARD_VERSION"
+"$VENV/bin/pip" install -q --disable-pip-version-check "lief==$LIEF_VERSION" "androguard==$ANDROGUARD_VERSION"
 
 # ---- 3. fontes externas com verificação de SHA-256 ------------------------------------------
 fetch_verified() { # url sha256 destino
@@ -134,7 +136,8 @@ fi
   java_bin="$(command -v java || true)"
   [ -x "$JAVA17_HOME/bin/java" ] && java_bin="$JAVA17_HOME/bin/java"
   for pair in "URE_JAVA:$java_bin" "URE_DOTNET:$(command -v dotnet || true)" \
-              "URE_APKTOOL:$(command -v apktool || true)"; do
+              "URE_APKTOOL:$(command -v apktool || true)" "URE_RADARE2:$(command -v r2 || true)" \
+              "URE_APKSIGNER:$(command -v apksigner || true)" "URE_MONODIS:$(command -v monodis || true)"; do
     value="${pair#*:}"; [ -n "$value" ] && echo "${pair%%:*}=$value"
   done
   for key in jadx ghidra apkanalyzer ilspycmd; do
