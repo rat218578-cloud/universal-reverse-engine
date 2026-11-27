@@ -105,10 +105,10 @@ jobs:
           APK=$(find apps/desktop/src-tauri/gen/android/app/build/outputs/apk -name "*.apk" -path "*debug*" | head -1)
           if [ -z "$APK" ]; then echo "::error::APK de depuração não foi gerado"; exit 1; fi
           LIST=$(unzip -l "$APK")
-          echo "$LIST" | grep -q "assets/ure-web/index.html" || { echo "::error::interface ausente no APK"; exit 1; }
-          echo "$LIST" | grep -q "lib/arm64-v8a/" || { echo "::error::biblioteca arm64-v8a ausente"; exit 1; }
-          echo "$LIST" | grep -q "lib/x86_64/" || { echo "::error::biblioteca x86_64 ausente"; exit 1; }
-          echo "$LIST" | grep -q "chaquopy" || { echo "::error::runtime Chaquopy ausente"; exit 1; }
+          grep -q "assets/ure-web/index.html" <<< "$LIST" || { echo "::error::interface ausente no APK"; exit 1; }
+          grep -q "lib/arm64-v8a/" <<< "$LIST" || { echo "::error::biblioteca arm64-v8a ausente"; exit 1; }
+          grep -q "lib/x86_64/" <<< "$LIST" || { echo "::error::biblioteca x86_64 ausente"; exit 1; }
+          grep -q "chaquopy" <<< "$LIST" || { echo "::error::runtime Chaquopy ausente"; exit 1; }
           mkdir -p "$RUNNER_TEMP/out"
           cp "$APK" "$RUNNER_TEMP/out/universal-reverse-engine-debug.apk"
           sha256sum "$RUNNER_TEMP/out/universal-reverse-engine-debug.apk" | tee "$RUNNER_TEMP/out/SHA256SUMS.txt"
