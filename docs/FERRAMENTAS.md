@@ -82,3 +82,38 @@ Para analisar um APK com as ferramentas instaladas, o APK precisa ser processado
   não executa aparece como `missing`, com o motivo.
 - LIEF: quando o módulo não importa, o motor de análise reporta `missing` com o motivo (não `failed`).
   Erros do worker que não são módulo ausente continuam `failed`.
+
+## Atualização: alternativas oficiais instaladas (2026-11-26)
+
+Fontes verificadas: os repositórios do GitHub (releases e API) respondem 403 pela política do
+proxy; `dl.google.com`, Maven e NuGet não respondem. Foram usados apenas apt oficial do Ubuntu e o
+índice oficial do PyPI. Nenhum hash foi informado de memória: cada um foi conferido contra o índice.
+
+| Motor | Papel | Versão | Origem | Verificação real |
+|---|---|---|---|---|
+| Androguard | manifesto, componentes, classes e decompilação DEX para Java (no lugar do JADX) | 4.1.4 | PyPI, venv do LIEF | importa; `androguard decompile` gera `Main.java` com o código do fixture |
+| radare2 | funções e símbolos de bibliotecas nativas (no lugar do Ghidra) | 5.5.0 | apt (`/usr/bin/r2`) | encontra `sym.ure_fixture_add` no `libfixture.so` |
+| apksigner | assinatura e certificados do APK (parte do apkanalyzer) | 0.9 (pacote 31.0.2) | apt (`/usr/bin/apksigner`) | APK assinado com chave de teste: verificado, DN e SHA-256 do certificado; APK sem assinatura: não verificado, com motivo |
+| monodis | desmontagem IL de assemblies .NET (não gera C#; parte do ILSpy) | mono-utils 6.8.0 | apt | lê `Calc::Add` na assembly de teste; arquivo que não é .NET é `failed` com motivo |
+
+Continuam ausentes, sem fonte acessível daqui: **JADX** (substituído pelo Androguard para Java),
+**apkanalyzer** (substituído parcialmente por Androguard e apksigner), **ILSpy** (substituído
+parcialmente pelo monodis em nível IL), **Ghidra** (substituído pelo radare2). `rizin` não existe no apt.
+
+### Pacotes ZIP para instalação (`/opt/ure-tools/packages/`)
+
+| Arquivo | SHA-256 do ZIP | Conteúdo e verificação |
+|---|---|---|
+| `ure-tool-androguard-4.1.4-cp313-linux-x86_64.zip` | `d7a4e41fd3c3c20e6c6e1eeebcf440d178159b29c1845eaf8c245ac6c20e4bed` | 37 wheels (Python 3.13, linux x86_64); cada hash confere com o índice JSON do PyPI; instalado offline em venv nova |
+| `ure-tool-radare2-5.5.0-amd64.zip` | `0d68b26c1bb4043bf1ac6fe8d21e0a2cfbf91783fce1f5e56ca6e33b1b86af9d` | `.deb` oficial; SHA-256 confere com o índice do apt |
+| `ure-tool-monodis-6.8.0-amd64.zip` | `593e474ad13cc8294c76c791317016277030ae36f4502faf84ad7cf8bd65ffec` | `.deb` oficial (mono-utils); confere com o apt |
+| `ure-tool-apksigner-31.0.2-all.zip` | `ab732884b6b75b190e1091c7f3375dc5304cce320f12d6b62f7db86ecfde4e35` | `.deb` oficial; confere com o apt |
+
+Cada ZIP traz `manifest.json` (origem de cada hash) e `SHA256SUMS.txt`. Os ZIPs não estão hospedados
+em nenhuma URL: o gerenciador só consegue instalá-los a partir de uma URL pública ou de arquivo local.
+
+### Aplicativo Android
+
+`URE_RUNTIME=android` é definido pelo backend do aparelho e a tela mostra "onde roda: aparelho
+(Android)". Nenhuma das ferramentas acima está no APK. Execução na nuvem para o aparelho exige que
+o aplicativo aponte para um servidor; essa parte ainda não existe.
