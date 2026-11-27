@@ -31,6 +31,7 @@ def start(data_dir: str, web_dir: str, port: int, token: str) -> int:
         if _server is not None:
             return int(_server.server_address[1])
         os.environ.update({
+            "URE_RUNTIME": "android",
             "URE_DATA_DIR": data_dir,
             "URE_WEB_DIR": web_dir,
             "URE_HOST": "127.0.0.1",

@@ -402,7 +402,7 @@ async function toolsView() {
       ? (t.pending && t.pending.length ? `dependências ausentes: ${t.pending.join(", ")}` : (t.note || "pronta"))
       : t.note;
     return h("tr", {},
-      h("td", {}, t.name, h("div", { class: "muted" }, t.purpose)),
+      h("td", {}, t.name, h("div", { class: "muted" }, t.purpose), h("div", { class: "muted" }, `onde roda: ${t.where || "servidor"}`)),
       h("td", {}, pill(t.status === "available", t.status === "available" ? "disponível" : "ausente")),
       h("td", {}, t.status === "available" ? t.version : "—"),
       h("td", {}, h("span", { class: "mono" }, t.path || "—")),
