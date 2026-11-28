@@ -3,14 +3,20 @@ package dev.ure.desktop
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.text.InputType
 import android.util.Log
+import android.view.View
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AlertDialog
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import com.chaquo.python.PyException
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import java.io.File
@@ -30,12 +36,18 @@ private const val WEB_ASSET_DIR = "ure-web"
  * Fluxo: escolhe uma porta livre e gera um token novo a cada abertura; o módulo `ure_android`
  * sobe o servidor em 127.0.0.1; ao responder a /api/v1/health, a janela carrega a interface
  * na própria origem do backend. O token chega à página por um script de início de documento,
- * restrito a essa origem, igual ao desktop. Nada é gravado em disco.
+ * restrito a essa origem, igual ao desktop.
+ *
+ * Armazenamento: o backend local não grava segredos em disco. Apenas o token do servidor remoto,
+ * quando o usuário escolhe conectar, é guardado cifrado com chave do Android Keystore
+ * ([RemoteCredentialStore]). O token nunca passa pela interface web: ela só pede os diálogos
+ * nativos pela ponte [RemoteBridge].
  */
 class MainActivity : TauriActivity() {
   private data class Session(val port: Int, val token: String)
 
   private val mainHandler = Handler(Looper.getMainLooper())
+  private val remoteStore by lazy { RemoteCredentialStore(this) }
 
   @Volatile private var session: Session? = null
   @Volatile private var pendingWebView: WebView? = null
@@ -84,6 +96,7 @@ class MainActivity : TauriActivity() {
       val ready = Session(actualPort, token)
       session = ready
       mainHandler.post { pendingWebView?.let { attach(it, ready) } }
+      restoreRemote()
     } catch (e: Exception) {
       Log.e(TAG, "falha ao iniciar o backend", e)
       synchronized(this) { starting = false }
@@ -105,6 +118,14 @@ class MainActivity : TauriActivity() {
       setOf(origin),
     )
     webView.webViewClient = BackendOnlyClient(origin)
+    // Ponte só para abrir diálogos nativos; nenhum segredo sai ou entra por ela.
+    webView.addJavascriptInterface(
+      RemoteBridge(
+        onConfigure = { mainHandler.post { showRemoteSetup() } },
+        onDisconnect = { mainHandler.post { disconnectRemote() } },
+      ),
+      "UreNative",
+    )
     Log.i(TAG, "carregando $origin/")
     webView.loadUrl("$origin/")
   }
@@ -162,6 +183,107 @@ class MainActivity : TauriActivity() {
       dest.mkdirs()
       for (child in children) copyAssetTree("$assetPath/$child", File(dest, child))
     }
+  }
+
+  /** Ao iniciar: reconfigura o servidor a partir do Keystore. Se a chave mudou, pede o token de novo. */
+  private fun restoreRemote() {
+    when (val result = remoteStore.load()) {
+      is RemoteCredentialStore.LoadResult.Empty -> Unit
+      is RemoteCredentialStore.LoadResult.Ready -> {
+        try {
+          Python.getInstance().getModule("ure_android").callAttr("set_remote", result.baseUrl, result.token)
+          Log.i(TAG, "servidor remoto configurado a partir do armazenamento cifrado")
+        } catch (e: PyException) {
+          // A mensagem do backend não contém o token; ainda assim não é registrada.
+          Log.w(TAG, "configuração guardada recusada pelo backend; pedindo novamente")
+          remoteStore.clear()
+          mainHandler.post {
+            showRemoteSetup("A configuração salva foi recusada. Informe o endereço e o token novamente.", result.baseUrl)
+          }
+        }
+      }
+      is RemoteCredentialStore.LoadResult.NeedsToken -> mainHandler.post {
+        showRemoteSetup(
+          "A chave de segurança do aparelho mudou ou os dados guardados estão inválidos. Informe o token novamente.",
+          result.baseUrl,
+        )
+      }
+    }
+  }
+
+  /** Diálogo nativo para endereço e token. O token é apagado do campo depois de enviado. */
+  private fun showRemoteSetup(message: String? = null, prefillUrl: String? = null) {
+    if (isDestroyed) return
+    val urlField = EditText(this).apply {
+      hint = "https://servidor.exemplo"
+      setText(prefillUrl ?: "")
+      inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+      importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
+    }
+    val tokenField = EditText(this).apply {
+      hint = "token (mínimo 32 caracteres)"
+      inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+      importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
+    }
+    val box = LinearLayout(this).apply {
+      orientation = LinearLayout.VERTICAL
+      val pad = (20 * resources.displayMetrics.density).toInt()
+      setPadding(pad, 0, pad, 0)
+      addView(urlField)
+      addView(tokenField)
+    }
+    AlertDialog.Builder(this)
+      .setTitle("Servidor remoto")
+      .setMessage(
+        message
+          ?: "O token é guardado cifrado com a chave do Android Keystore. Ele não aparece em logs nem na tela.",
+      )
+      .setView(box)
+      .setNegativeButton(android.R.string.cancel, null)
+      .setPositiveButton("Salvar") { _, _ ->
+        val url = urlField.text.toString().trim()
+        val token = tokenField.text.toString()
+        tokenField.text.clear()
+        Thread({ saveRemote(url, token) }, "ure-remote-save").start()
+      }
+      .show()
+  }
+
+  private fun saveRemote(url: String, token: String) {
+    try {
+      Python.getInstance().getModule("ure_android").callAttr("set_remote", url, token)
+    } catch (e: PyException) {
+      // Mensagens do backend são controladas e não incluem o token.
+      mainHandler.post {
+        showRemoteSetup("Não foi possível usar essa configuração: ${e.message ?: "dados recusados"}", url)
+      }
+      return
+    }
+    try {
+      remoteStore.save(url, token)
+      mainHandler.post { toast("Servidor remoto configurado.") }
+    } catch (e: Exception) {
+      Log.w(TAG, "configuração válida, mas não foi possível guardar (${e.javaClass.simpleName})")
+      mainHandler.post {
+        toast("Configurado nesta sessão, mas não foi possível guardar com segurança. Será preciso informar o token de novo.")
+      }
+    }
+  }
+
+  private fun disconnectRemote() {
+    Thread({
+      remoteStore.clear()
+      try {
+        if (Python.isStarted()) Python.getInstance().getModule("ure_android").callAttr("clear_remote")
+      } catch (e: Exception) {
+        Log.w(TAG, "falha ao esquecer o servidor remoto nesta sessão (${e.javaClass.simpleName})")
+      }
+      mainHandler.post { toast("Servidor remoto desconectado. Credenciais apagadas.") }
+    }, "ure-remote-clear").start()
+  }
+
+  private fun toast(text: String) {
+    if (!isDestroyed) Toast.makeText(this, text, Toast.LENGTH_LONG).show()
   }
 
   private fun showError(message: String) {
