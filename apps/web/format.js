@@ -31,3 +31,12 @@ export function parentPath(path) {
   const i = path.lastIndexOf("/");
   return i === -1 ? "" : path.slice(0, i);
 }
+
+/** Texto de andamento do envio ao servidor remoto (função pura, testada). */
+export function remoteJobLabel(job) {
+  const names = { queued: "na fila", running: "enviando e analisando no servidor", done: "concluído", failed: "falhou" };
+  const base = names[job.status] || String(job.status || "desconhecido");
+  if (job.status === "failed") return `${base}: ${job.error || job.message || "sem detalhes"}`;
+  if (job.status === "done" && job.error) return `concluído com avisos: ${job.error}`;
+  return job.message ? `${base} (${job.message})` : base;
+}

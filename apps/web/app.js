@@ -1,6 +1,6 @@
 import { api, setToken, ApiErr } from "./api.js";
 import { createSSEParser } from "./sse.js";
-import { formatBytes, kindLabel, shortHash, joinPath, parentPath } from "./format.js";
+import { formatBytes, kindLabel, shortHash, joinPath, parentPath, remoteJobLabel } from "./format.js";
 
 const view = document.querySelector("#app");
 const EXTRACTABLE = ["apk", "jar", "zip"];
@@ -202,7 +202,45 @@ function actionsCard(pid, art, jobBox) {
     h("div", { class: "row", style: "margin-top:10px" },
       h("button", { class: "secondary", onclick: () => download(pid, art, withOriginal.checked) }, "Exportar ZIP"),
       h("label", { class: "muted" }, withOriginal, " incluir arquivo original")),
+    h("div", { class: "row", style: "margin-top:10px" },
+      h("button", { class: "secondary", onclick: () => sendRemote(pid, art, jobBox) }, "Enviar ao servidor remoto"),
+      h("span", { class: "muted" }, "usa os motores do servidor; resultados ficam neste artefato")),
   );
+}
+
+/** Envia o original ao servidor remoto configurado no aparelho e acompanha o job. */
+async function sendRemote(pid, art, box) {
+  const show = (text) => box.replaceChildren(h("h3", {}, "Processamento"), h("p", { class: "muted" }, text));
+  show("Enviando ao servidor remoto…");
+  try {
+    let job = await api("POST", `/api/v1/projects/${pid}/artifacts/${art.id}/remote-send`, { body: {} });
+    while (job.status === "queued" || job.status === "running") {
+      show(remoteJobLabel(job));
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      job = await api("GET", `/api/v1/remote/jobs/${job.id}`);
+    }
+    show(remoteJobLabel(job));
+    toast(job.status === "done" ? "Resultados do servidor salvos neste artefato." : "Envio não concluído.", job.status !== "done");
+  } catch (e) {
+    show(`Não foi possível enviar: ${e.message}`);
+    fail(e);
+  }
+}
+
+/** Cartão de servidor remoto. Não aparece no servidor de desktop (a rota não existe lá). */
+function remoteCard(state) {
+  if (!state) return null;
+  const native = window.UreNative || null;
+  const configure = h("button", { class: "secondary", disabled: !native,
+    onclick: () => native.configure() }, state.configured ? "Trocar servidor ou token" : "Configurar servidor");
+  const disconnect = h("button", { class: "danger", disabled: !native || !state.configured,
+    onclick: () => { native.disconnect(); setTimeout(() => route().catch(fail), 1500); } }, "Desconectar e apagar credenciais");
+  return h("div", { class: "card" }, h("h3", {}, "Servidor remoto"),
+    h("p", {}, state.configured ? `Conectado a ${state.server}` : "Nenhum servidor configurado. A análise local continua funcionando."),
+    h("p", { class: "muted" }, "O token é guardado cifrado no aparelho e nunca aparece nesta tela."),
+    native ? null : h("p", { class: "muted" }, "Configurar o servidor só é possível no aplicativo Android."),
+    h("div", { class: "row" }, configure, disconnect,
+      h("button", { class: "secondary", onclick: () => route().catch(fail) }, "Atualizar")));
 }
 
 async function extract(pid, aid) {
@@ -376,7 +414,11 @@ async function aiCard(pid, aid, report) {
 // ----- ferramentas -------------------------------------------------------
 // Estado vindo do servidor (sondagem real e teste de execução). Nada é exibido como disponível sem isso.
 async function toolsView() {
-  const [{ tools }, ai] = await Promise.all([api("GET", "/api/v1/tools"), api("GET", "/api/v1/ai/status")]);
+  const [{ tools }, ai, remote] = await Promise.all([
+    api("GET", "/api/v1/tools"),
+    api("GET", "/api/v1/ai/status"),
+    api("GET", "/api/v1/remote").catch(() => null),
+  ]);
   const pill = (ok, text) => h("span", { class: `pill ${ok ? "ok" : "warn"}` }, text);
   const rowFor = (t) => {
     const result = h("div", { class: "muted" });
@@ -417,6 +459,7 @@ async function toolsView() {
         h("th", {}, "Ferramenta"), h("th", {}, "Status"), h("th", {}, "Versão"),
         h("th", {}, "Caminho"), h("th", {}, "Observação"), h("th", {}, "Teste de execução"))),
       h("tbody", {}, tools.map(rowFor)))),
+    remoteCard(remote),
     h("div", { class: "card" }, h("h3", {}, "IA (opcional)"),
       h("p", {}, `Ligada: ${ai.enabled ? "sim" : "não"} · Ollama local: ${ai.ollama_reachable ? "alcançável" : "indisponível"} · Orçamento diário: ${ai.calls_today}/${ai.daily_budget}`),
       h("p", { class: "muted" }, "Provedores externos não estão implementados nesta versão e exigem consentimento explícito.")),

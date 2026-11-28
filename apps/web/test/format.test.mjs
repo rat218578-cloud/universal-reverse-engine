@@ -16,3 +16,15 @@ test("rótulos de tipo e caminhos", () => {
   assert.equal(parentPath("a/b/c"), "a/b");
   assert.equal(parentPath("a"), "");
 });
+
+test("andamento do envio remoto mostra estado e motivo sem segredos", async () => {
+  const { remoteJobLabel } = await import("../format.js");
+  assert.equal(remoteJobLabel({ status: "queued" }), "na fila");
+  assert.equal(remoteJobLabel({ status: "running", message: "servidor: analisando" }),
+    "enviando e analisando no servidor (servidor: analisando)");
+  assert.equal(remoteJobLabel({ status: "done", error: null }), "concluído");
+  assert.equal(remoteJobLabel({ status: "done", error: "relatório indisponível" }),
+    "concluído com avisos: relatório indisponível");
+  assert.equal(remoteJobLabel({ status: "failed", error: "servidor recusou a operação (401)" }),
+    "falhou: servidor recusou a operação (401)");
+});
