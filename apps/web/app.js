@@ -220,9 +220,40 @@ async function sendRemote(pid, art, box) {
       job = await api("GET", `/api/v1/remote/jobs/${job.id}`);
     }
     show(remoteJobLabel(job));
+    if (job.status === "done") box.append(remoteResultsRow(pid, art));
     toast(job.status === "done" ? "Resultados do servidor salvos neste artefato." : "Envio não concluído.", job.status !== "done");
   } catch (e) {
     show(`Não foi possível enviar: ${e.message}`);
+    fail(e);
+  }
+}
+
+/** Botões para ver o relatório e baixar a exportação devolvidos pelo servidor. */
+function remoteResultsRow(pid, art) {
+  const holder = h("div", {});
+  const base = `/api/v1/projects/${pid}/artifacts/${art.id}`;
+  const row = h("div", { class: "row", style: "margin-top:10px" },
+    h("button", { class: "secondary", onclick: async () => {
+      try {
+        holder.replaceChildren(reportCard(await api("GET", `${base}/remote-report`)));
+      } catch (e) {
+        fail(e);
+      }
+    } }, "Ver relatório do servidor"),
+    h("button", { class: "secondary", onclick: () => downloadRemoteExport(pid, art) }, "Baixar ZIP do servidor"));
+  return h("div", {}, row, holder);
+}
+
+async function downloadRemoteExport(pid, art) {
+  try {
+    const res = await api("GET", `/api/v1/projects/${pid}/artifacts/${art.id}/remote-export`, { raw: true });
+    const url = URL.createObjectURL(await res.blob());
+    const a = h("a", { href: url, download: `${art.filename.replace(/\.[^.]+$/, "")}-servidor.zip` });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  } catch (e) {
     fail(e);
   }
 }
