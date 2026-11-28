@@ -78,6 +78,10 @@ class RemoteClient:
                  ssl_context: ssl.SSLContext | None = None) -> None:
         self.config = config
         self.timeout_s = timeout_s
+        if ssl_context is not None and (
+            ssl_context.verify_mode != ssl.CERT_REQUIRED or not ssl_context.check_hostname
+        ):
+            raise RemoteError("validação de certificado TLS não pode ser desligada")
         self._ssl = ssl_context
         parts = urllib.parse.urlsplit(config.base_url)
         self._https = parts.scheme == "https"
