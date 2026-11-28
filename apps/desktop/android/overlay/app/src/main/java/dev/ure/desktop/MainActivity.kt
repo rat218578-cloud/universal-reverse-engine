@@ -1,5 +1,6 @@
 package dev.ure.desktop
 
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -218,12 +219,12 @@ class MainActivity : TauriActivity() {
       hint = "https://servidor.exemplo"
       setText(prefillUrl ?: "")
       inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
-      importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
+      disableAutofill(this)
     }
     val tokenField = EditText(this).apply {
       hint = "token (mínimo 32 caracteres)"
       inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-      importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
+      disableAutofill(this)
     }
     val box = LinearLayout(this).apply {
       orientation = LinearLayout.VERTICAL
@@ -280,6 +281,11 @@ class MainActivity : TauriActivity() {
       }
       mainHandler.post { toast("Servidor remoto desconectado. Credenciais apagadas.") }
     }, "ure-remote-clear").start()
+  }
+
+  /** importantForAutofill existe desde API 26; o minSdk é 24, então a chamada é protegida. */
+  private fun disableAutofill(view: View) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) view.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
   }
 
   private fun toast(text: String) {
