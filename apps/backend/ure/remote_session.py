@@ -14,10 +14,10 @@ funcionando mesmo que o servidor esteja fora do ar.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 import threading
-import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -89,6 +89,9 @@ def _run_send(app: Any, cfg: RemoteConfig, pid: str, aid: str, filename: str, ji
         root = app.root_of(pid, aid)
         apk = root / "original" / filename
         out_dir = root / "remote"
+        # Resultados de um envio anterior não podem sobreviver a um envio que falhou.
+        for stale in ("analysis.json", "export.zip"):
+            (out_dir / stale).unlink(missing_ok=True)
 
         def on_progress(server_job: dict[str, Any]) -> None:
             _update(jid, message=f"servidor: {server_job.get('message') or server_job.get('status')}",
@@ -140,7 +143,29 @@ def _job_route(a: Any, h: Any, m: Any, q: dict[str, str]) -> tuple[int, Any]:
     return 200, found
 
 
+def _remote_dir(a: Any, pid: str, aid: str) -> Path:
+    art = a.artifact_or_404(pid, aid)
+    return a.root_of(art["project_id"], art["id"]) / "remote"
+
+
+def _remote_report_route(a: Any, h: Any, m: Any, q: dict[str, str]) -> tuple[int, Any]:
+    path = _remote_dir(a, m.group(1), m.group(2)) / "analysis.json"
+    if not path.is_file():
+        raise ure_app.ApiError(404, "relatório do servidor ainda não disponível")
+    return 200, json.loads(path.read_text(encoding="utf-8"))
+
+
+def _remote_export_route(a: Any, h: Any, m: Any, q: dict[str, str]) -> tuple[int, Any]:
+    art = a.artifact_or_404(m.group(1), m.group(2))
+    path = _remote_dir(a, m.group(1), m.group(2)) / "export.zip"
+    if not path.is_file():
+        raise ure_app.ApiError(404, "exportação do servidor ainda não disponível")
+    return 200, ure_app.FileResponse(path, "application/zip", f"{Path(art['filename']).stem}-servidor.zip")
+
+
 ROUTES = [
+    ("GET", re.compile(rf"/api/v1/projects/{ure_app.ID}/artifacts/{ure_app.ID}/remote-report"), _remote_report_route),
+    ("GET", re.compile(rf"/api/v1/projects/{ure_app.ID}/artifacts/{ure_app.ID}/remote-export"), _remote_export_route),
     ("GET", re.compile(r"/api/v1/remote"), _status_route),
     ("POST", re.compile(rf"/api/v1/projects/{ure_app.ID}/artifacts/{ure_app.ID}/remote-send"), _send_route),
     ("GET", re.compile(r"/api/v1/remote/jobs/" + ure_app.ID), _job_route),

@@ -107,6 +107,25 @@ class RemoteSessionTests(ApiCase):
         self.assertNotIn(TOKEN, json.dumps(final))
         self.assertEqual(_files_containing(self.server.ure_app.settings.data_dir, TOKEN.encode()), [],
                          "o token não pode ser gravado em nenhum arquivo do aparelho")
+        # Resultados disponíveis pela API local (relatório e exportação do servidor)
+        status, rep = self.js("GET", f"/api/v1/projects/{pid}/artifacts/{art['id']}/remote-report")
+        self.assertEqual(status, 200)
+        self.assertEqual(rep["engines"]["apktool"]["status"], "ok")
+        status, raw, headers = self.call("GET", f"/api/v1/projects/{pid}/artifacts/{art['id']}/remote-export")
+        self.assertEqual(status, 200)
+        self.assertTrue(raw.startswith(b"PK"), "exportação deve ser um ZIP")
+
+    def test_failed_send_does_not_leave_previous_results_visible(self) -> None:
+        remote_session.configure(self.remote_base, TOKEN)
+        pid = self.new_project("resultado antigo")
+        _, art = self._upload_raw(pid, "fixture.apk", FIXTURE_APK.read_bytes())
+        _, job = self.js("POST", f"/api/v1/projects/{pid}/artifacts/{art['id']}/remote-send", {})
+        self.assertEqual(self._wait(job["id"])["status"], "done")
+        remote_session.configure(self.remote_base, WRONG)
+        _, job = self.js("POST", f"/api/v1/projects/{pid}/artifacts/{art['id']}/remote-send", {})
+        self.assertEqual(self._wait(job["id"])["status"], "failed")
+        status, _ = self.js("GET", f"/api/v1/projects/{pid}/artifacts/{art['id']}/remote-report")
+        self.assertEqual(status, 404)
 
     def test_wrong_token_fails_the_job_without_leaking_the_token(self) -> None:
         remote_session.configure(self.remote_base, WRONG)
