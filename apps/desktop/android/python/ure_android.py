@@ -44,7 +44,10 @@ def start(data_dir: str, web_dir: str, port: int, token: str) -> int:
         from pathlib import Path
 
         from ure import app as ure_app
+        from ure import remote_session
         from ure.config import Settings
+
+        remote_session.install_routes()
 
         # A interface é resolvida na importação do módulo. Se ele já tiver sido importado com
         # outra pasta, apontamos para a pasta recebida agora.
@@ -71,3 +74,21 @@ def stop() -> None:
         if app is not None:
             app.jobs.shutdown()
             app.store.close()
+
+
+def set_remote(base_url: str, token: str) -> dict:
+    """Configura o servidor remoto em memória. O token vem do Android Keystore, nunca de HTTP.
+
+    Erros não incluem o token. Devolve o estado público (sem token).
+    """
+    from ure import remote_session
+
+    remote_session.install_routes()
+    return remote_session.configure(base_url, token)
+
+
+def clear_remote() -> dict:
+    """Esquece a configuração do servidor remoto nesta execução."""
+    from ure import remote_session
+
+    return remote_session.clear()

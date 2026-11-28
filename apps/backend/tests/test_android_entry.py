@@ -1,84 +1,53 @@
-"""Contrato do ponto de entrada Android (apps/desktop/android/python/ure_android.py).
+"""Funções de configuração remota do módulo de entrada do aparelho (ure_android.py).
 
-Roda no Linux e no Windows como o restante do backend: o módulo usa só a stdlib e o pacote ure.
+Carrega o arquivo real do aplicativo. O servidor HTTP do aparelho não é iniciado aqui.
 """
 from __future__ import annotations
 
 import importlib.util
-import os
-import socket
-import tempfile
+import json
 import unittest
-import urllib.error
-import urllib.request
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[3]
-ENTRY = REPO / "apps" / "desktop" / "android" / "python" / "ure_android.py"
-WEB = REPO / "apps" / "web"
-TOKEN = "a" * 64
-ENV_KEYS = ("URE_DATA_DIR", "URE_WEB_DIR", "URE_HOST", "URE_PORT", "URE_TOKEN", "URE_AI_ENABLED", "URE_PARENT_WATCH")
+from ure import remote, remote_session
+
+ENTRY = Path(__file__).resolve().parents[2] / "desktop" / "android" / "python" / "ure_android.py"
+TOKEN = "token-do-keystore-simulado-0123456789ab"
 
 
 def _load_entry():
-    spec = importlib.util.spec_from_file_location("ure_android", ENTRY)
+    spec = importlib.util.spec_from_file_location("ure_android_under_test", ENTRY)
     module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
     spec.loader.exec_module(module)
     return module
 
 
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
-class AndroidEntryTests(unittest.TestCase):
+class AndroidEntryRemoteTests(unittest.TestCase):
     def setUp(self) -> None:
-        self._saved = {k: os.environ.get(k) for k in ENV_KEYS}
-        self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.entry = _load_entry()
-        self.data = Path(self._tmp.name) / "data"
+        remote_session.clear()
 
     def tearDown(self) -> None:
-        self.entry.stop()
-        for key, value in self._saved.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-        self._tmp.cleanup()
+        remote_session.clear()
 
-    def _get(self, port: int, path: str):
-        return urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=5)
+    def test_set_and_clear_remote_only_reports_state(self) -> None:
+        state = self.entry.set_remote("https://ure.exemplo.org", TOKEN)
+        self.assertEqual(state, {"configured": True, "server": "https://ure.exemplo.org"})
+        self.assertNotIn(TOKEN, json.dumps(state))
+        self.assertEqual(self.entry.clear_remote(), {"configured": False, "server": None})
 
-    def test_start_serves_health_and_interface(self) -> None:
-        port = self.entry.start(str(self.data), str(WEB), _free_port(), TOKEN)
-        with self._get(port, "/api/v1/health") as res:
-            self.assertEqual(res.status, 200)
-        with self._get(port, "/") as res:
-            self.assertEqual(res.status, 200)
-            body = res.read()
-        self.assertEqual(body, (WEB / "index.html").read_bytes())
+    def test_plain_http_to_remote_host_is_refused_without_echoing_token(self) -> None:
+        with self.assertRaises(remote.RemoteError) as ctx:
+            self.entry.set_remote("http://192.168.0.20:8765", TOKEN)
+        self.assertNotIn(TOKEN, ctx.exception.message)
+        self.assertFalse(remote_session.status()["configured"])
 
-    def test_start_is_idempotent_and_stop_releases_port(self) -> None:
-        port = self.entry.start(str(self.data), str(WEB), _free_port(), TOKEN)
-        self.assertEqual(self.entry.start(str(self.data), str(WEB), 1, TOKEN), port)
-        self.entry.stop()
-        with self.assertRaises((urllib.error.URLError, ConnectionError, OSError)):
-            self._get(port, "/api/v1/health")
-        self.entry.stop()  # segunda chamada não falha
-
-    def test_rejects_short_token_and_bad_port(self) -> None:
-        with self.assertRaises(ValueError):
-            self.entry.start(str(self.data), str(WEB), _free_port(), "curto")
-        with self.assertRaises(ValueError):
-            self.entry.start(str(self.data), str(WEB), 0, TOKEN)
-
-    def test_binds_loopback_only(self) -> None:
-        port = self.entry.start(str(self.data), str(WEB), _free_port(), TOKEN)
-        self.assertEqual(self.entry._server.server_address[0], "127.0.0.1")
-        self.assertGreater(port, 0)
+    def test_short_token_is_refused_without_echoing_it(self) -> None:
+        short = "curto-demais"
+        with self.assertRaises(remote.RemoteError) as ctx:
+            self.entry.set_remote("https://ure.exemplo.org", short)
+        self.assertNotIn(short, ctx.exception.message)
 
 
 if __name__ == "__main__":
