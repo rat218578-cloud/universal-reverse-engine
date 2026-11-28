@@ -27,6 +27,22 @@ WRONG = "token-errado-de-teste-0123456789abcdef0"
 FIXTURE_APK = Path(__file__).parent / "fixtures" / "real" / "fixture.apk"
 
 
+def _files_containing(root: Path, needle: bytes) -> list[str]:
+    """Procura o segredo em todo arquivo do diretório, inclusive dentro de ZIPs (conteúdo comprimido)."""
+    hits: list[str] = []
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        if needle in path.read_bytes():
+            hits.append(str(path))
+        if zipfile.is_zipfile(path):
+            with zipfile.ZipFile(path) as zf:
+                for info in zf.infolist():
+                    if needle in zf.read(info.filename):
+                        hits.append(f"{path}!{info.filename}")
+    return hits
+
+
 class RemoteSessionTests(ApiCase):
     token = "token-do-aparelho-0123456789abcdef-xyz"
 
@@ -89,6 +105,8 @@ class RemoteSessionTests(ApiCase):
         report = json.loads((root / "remote" / "analysis.json").read_text(encoding="utf-8"))
         self.assertEqual(report["engines"]["apktool"]["status"], "ok")
         self.assertNotIn(TOKEN, json.dumps(final))
+        self.assertEqual(_files_containing(self.server.ure_app.settings.data_dir, TOKEN.encode()), [],
+                         "o token não pode ser gravado em nenhum arquivo do aparelho")
 
     def test_wrong_token_fails_the_job_without_leaking_the_token(self) -> None:
         remote_session.configure(self.remote_base, WRONG)
